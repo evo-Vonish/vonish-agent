@@ -1,0 +1,168 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    @apply bg-background text-foreground;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    overflow: hidden;
+  }
+
+  #root {
+    @apply h-screen w-screen;
+  }
+
+  /* Dark scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #3a3a3a;
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #4a4a4a;
+  }
+
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}
+
+@layer components {
+  /* Markdown styles */
+  .markdown-body {
+    @apply text-sm leading-relaxed;
+  }
+
+  .markdown-body h1 {
+    @apply text-lg font-bold mt-4 mb-2 text-foreground;
+  }
+
+  .markdown-body h2 {
+    @apply text-base font-semibold mt-3 mb-2 text-foreground;
+  }
+
+  .markdown-body h3 {
+    @apply text-sm font-semibold mt-2 mb-1 text-foreground;
+  }
+
+  .markdown-body p {
+    @apply mb-2;
+  }
+
+  .markdown-body ul,
+  .markdown-body ol {
+    @apply pl-4 mb-2;
+  }
+
+  .markdown-body ul {
+    @apply list-disc;
+  }
+
+  .markdown-body ol {
+    @apply list-decimal;
+  }
+
+  .markdown-body li {
+    @apply mb-0.5;
+  }
+
+  .markdown-body li.ul-item,
+  .markdown-body li.ol-item {
+    @apply list-none pl-0;
+  }
+
+  .markdown-body li.ul-item::before {
+    content: '•';
+    @apply mr-1.5 text-foreground-muted;
+  }
+
+  .markdown-body li.ol-item::before {
+    content: attr(data-num) '.';
+    @apply mr-1.5 text-foreground-muted;
+  }
+
+  .markdown-body li.check-item {
+    @apply list-none pl-0 flex items-start gap-1.5;
+  }
+
+  .markdown-body li.check-item::before {
+    content: '☐';
+    @apply text-foreground-muted flex-shrink-0;
+  }
+
+  .markdown-body li.check-item.checked::before {
+    content: '☑';
+    @apply text-success flex-shrink-0;
+  }
+
+  .markdown-body blockquote {
+    @apply border-l-2 border-primary/40 pl-3 py-0.5 my-2 bg-surface-hover rounded-r-md;
+    @apply text-foreground-muted italic;
+  }
+
+  .markdown-body a {
+    @apply text-primary hover:underline;
+  }
+
+  .markdown-body hr {
+    @apply my-3 border-border;
+  }
+
+  .markdown-body img {
+    @apply max-w-full rounded-md my-2;
+  }
+
+  .markdown-body table.md-table {
+    @apply w-full text-xs border-collapse my-2;
+  }
+
+  .markdown-body table.md-table td {
+    @apply border border-border px-2 py-1;
+  }
+
+  .markdown-body table.md-table tr:first-child td {
+    @apply bg-surface-hover font-medium;
+  }
+
+  /* Code blocks */
+  .markdown-body .code-block {
+    @apply block bg-[#0f0f0f] border border-border rounded-md p-3 my-2 overflow-x-auto;
+  }
+
+  .markdown-body .code-block code {
+    @apply text-xs leading-relaxed font-mono;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .markdown-body .inline-code {
+    @apply px-1.5 py-0.5 bg-[#0f0f0f] border border-border rounded text-xs;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .markdown-body pre {
+    @apply text-xs leading-relaxed;
+  }
+
+  /* Selection */
+  ::selection {
+    @apply bg-primary/30 text-foreground;
+  }
+}

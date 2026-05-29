@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "name": "edit_file",
+  "description": "Edit a file by replacing a specific string with another. Uses exact string matching for safe edits.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "Relative path to the file within the workspace"
+      },
+      "old_string": {
+        "type": "string",
+        "description": "The exact text to be replaced. Must match the file content precisely."
+      },
+      "new_string": {
+        "type": "string",
+        "description": "The replacement text"
+      },
+      "expected_replacements": {
+        "type": "integer",
+        "description": "Expected number of occurrences to replace (default: 1, use -1 for all)",
+        "default": 1
+      }
+    },
+    "required": ["path", "old_string", "new_string"]
+  },
+  "returns": {
+    "type": "object",
+    "properties": {
+      "success": {
+        "type": "boolean"
+      },
+      "replacements_made": {
+        "type": "integer"
+      },
+      "message": {
+        "type": "string"
+      }
+    }
+  },
+  "requires_confirmation": true
+}

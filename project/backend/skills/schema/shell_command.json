@@ -1,0 +1,50 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "name": "shell_command",
+  "description": "Execute a shell command in the workspace environment. Use with caution - only safe commands are allowed.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "command": {
+        "type": "string",
+        "description": "Shell command to execute. Only read-safe commands are permitted (cat, ls, grep, find, wc, head, tail, etc.)"
+      },
+      "timeout": {
+        "type": "integer",
+        "description": "Timeout in seconds (default: 30, max: 300)",
+        "default": 30,
+        "minimum": 1,
+        "maximum": 300
+      },
+      "working_dir": {
+        "type": "string",
+        "description": "Working directory relative to workspace root (default: '.')",
+        "default": "."
+      }
+    },
+    "required": ["command"]
+  },
+  "returns": {
+    "type": "object",
+    "properties": {
+      "stdout": {
+        "type": "string"
+      },
+      "stderr": {
+        "type": "string"
+      },
+      "exit_code": {
+        "type": "integer"
+      },
+      "execution_time_ms": {
+        "type": "integer"
+      }
+    }
+  },
+  "requires_confirmation": true,
+  "allowed_commands": [
+    "cat", "ls", "grep", "find", "wc", "head", "tail", "sort",
+    "uniq", "diff", "file", "pwd", "echo", "cut", "awk", "sed",
+    "which", "whoami", "date", "df", "du", "stat", "tree"
+  ]
+}

@@ -1,0 +1,49 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "name": "read_file",
+  "description": "Read the contents of a file in the workspace. Returns the file content as text or binary data.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "Relative path to the file within the workspace (e.g., 'uploads/report.pdf', 'outputs/data.csv')"
+      },
+      "offset": {
+        "type": "integer",
+        "description": "Starting byte offset for partial reads (default: 0)",
+        "default": 0,
+        "minimum": 0
+      },
+      "limit": {
+        "type": "integer",
+        "description": "Maximum bytes to read (default: 100000)",
+        "default": 100000,
+        "minimum": 1,
+        "maximum": 500000
+      }
+    },
+    "required": ["path"]
+  },
+  "returns": {
+    "type": "object",
+    "properties": {
+      "content": {
+        "type": "string",
+        "description": "File content as text (for text files) or base64 (for binary)"
+      },
+      "encoding": {
+        "type": "string",
+        "enum": ["text", "base64"]
+      },
+      "size": {
+        "type": "integer",
+        "description": "Total file size in bytes"
+      },
+      "truncated": {
+        "type": "boolean",
+        "description": "Whether the content was truncated"
+      }
+    }
+  }
+}

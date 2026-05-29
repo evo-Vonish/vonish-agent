@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "name": "web_fetch",
+  "description": "Fetch and extract content from a web URL. Supports HTML, markdown, and plain text extraction.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "url": {
+        "type": "string",
+        "description": "URL to fetch and extract content from"
+      },
+      "extract_type": {
+        "type": "string",
+        "enum": ["text", "markdown", "html", "article"],
+        "description": "Extraction type (default: article for main content extraction)",
+        "default": "article"
+      },
+      "timeout": {
+        "type": "integer",
+        "description": "Request timeout in seconds (default: 30)",
+        "default": 30,
+        "minimum": 5,
+        "maximum": 120
+      },
+      "max_length": {
+        "type": "integer",
+        "description": "Maximum content length to return in characters (default: 50000)",
+        "default": 50000,
+        "minimum": 1000,
+        "maximum": 200000
+      }
+    },
+    "required": ["url"]
+  },
+  "returns": {
+    "type": "object",
+    "properties": {
+      "url": {
+        "type": "string"
+      },
+      "title": {
+        "type": "string"
+      },
+      "content": {
+        "type": "string",
+        "description": "Extracted content"
+      },
+      "content_type": {
+        "type": "string"
+      },
+      "links": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "fetch_time_ms": {
+        "type": "integer"
+      }
+    }
+  }
+}

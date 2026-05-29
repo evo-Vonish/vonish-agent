@@ -1,0 +1,190 @@
+import { useState, useRef } from 'react';
+import {
+  FileText,
+  Globe,
+  FolderOpen,
+  Terminal,
+  ChevronDown,
+  ChevronUp,
+  Copy,
+  Check,
+  Zap,
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+import type { ToolDefinition, ApprovalLevel } from '@/types/tools';
+import { APPROVAL_LEVEL_COLORS, APPROVAL_LEVEL_LABELS } from '@/types/tools';
+import { ToolToggle } from './ToolToggle';
+import { useToolStore } from '@/stores/useToolStore';
+
+const CATEGORY_ICON_MAP = {
+  file_ops: FolderOpen,
+  workspace: LayoutIcon,
+  web_search: Globe,
+  system: Terminal,
+};
+
+function LayoutIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...props}
+    >
+      <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
+      <line x1="3" x2="21" y1="9" y2="9" />
+      <line x1="9" x2="9" y1="21" y2="9" />
+    </svg>
+  );
+}
+
+interface ToolCardProps {
+  tool: ToolDefinition;
+}
+
+export function ToolCard({ tool }: ToolCardProps) {
+  const [expanded, setExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const schemaRef = useRef<HTMLPreElement>(null);
+  const toggleTool = useToolStore((s) => s.toggleTool);
+
+  const IconComponent = CATEGORY_ICON_MAP[tool.category] || FileText;
+
+  const handleCopySchema = async () => {
+    const schemaText = JSON.stringify(tool.schema, null, 2);
+    await navigator.clipboard.writeText(schemaText);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const approvalColor = APPROVAL_LEVEL_COLORS[tool.approvalLevel as ApprovalLevel];
+  const approvalLabel = APPROVAL_LEVEL_LABELS[tool.approvalLevel as ApprovalLevel];
+
+  return (
+    <div
+      className={cn(
+        'rounded-lg border border-border bg-surface transition-all duration-200',
+        'hover:border-border-hover hover:shadow-sm'
+      )}
+    >
+      {/* Main row */}
+      <div
+        className="flex items-center gap-3 px-4 py-3 cursor-pointer"
+        onClick={() => setExpanded(!expanded)}
+      >
+        {/* Icon */}
+        <div className="flex-shrink-0 w-8 h-8 rounded-md bg-primary/10 flex items-center justify-center">
+          <IconComponent className="w-4 h-4 text-primary" />
+        </div>
+
+        {/* Name + Description */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold text-foreground">{tool.name}</span>
+            {tool.supportsParallel && (
+              <Zap className="w-3 h-3 text-warning" />
+            )}
+          </div>
+          <p className="text-xs text-foreground-muted truncate">{tool.description}</p>
+        </div>
+
+        {/* Approval Level Badge */}
+        <span
+          className={cn(
+            'flex-shrink-0 px-2 py-0.5 text-[10px] font-medium rounded-full border',
+            approvalColor
+          )}
+        >
+          {approvalLabel}
+        </span>
+
+        {/* Use count */}
+        <div className="hidden sm:flex flex-shrink-0 items-center gap-1 text-xs text-foreground-subtle">
+          <span className="font-medium">{tool.useCount.toLocaleString()}</span>
+          <span className="text-foreground-subtle/60">uses</span>
+        </div>
+
+        {/* Toggle */}
+        <div
+          className="flex-shrink-0"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <ToolToggle enabled={tool.isEnabled} onToggle={() => toggleTool(tool.name)} />
+        </div>
+
+        {/* Expand chevron */}
+        <div className="flex-shrink-0 text-foreground-subtle">
+          {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+        </div>
+      </div>
+
+      {/* Expanded schema section */}
+      <div
+        className={cn(
+          'overflow-hidden transition-all duration-300 ease-in-out',
+          expanded ? 'max-h-[500px] opacity-100' : 'max-h-0 opacity-0'
+        )}
+      >
+        <div className="px-4 pb-3 border-t border-border">
+          <div className="flex items-center justify-between py-2">
+            <span className="text-xs font-medium text-foreground-muted">JSON Schema</span>
+            <button
+              onClick={handleCopySchema}
+              className={cn(
+                'flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-colors',
+                copied
+                  ? 'bg-success/20 text-success'
+                  : 'bg-surface-hover text-foreground-muted hover:text-foreground hover:bg-surface-elevated'
+              )}
+            >
+              {copied ? (
+                <>
+                  <Check className="w-3 h-3" />
+                  Copied
+                </>
+              ) : (
+                <>
+                  <Copy className="w-3 h-3" />
+                  Copy
+                </>
+              )}
+            </button>
+          </div>
+          <pre
+            ref={schemaRef}
+            className="bg-[#0f0f0f] border border-border rounded-md p-3 overflow-x-auto text-[11px] leading-relaxed text-foreground-muted font-mono max-h-64 overflow-y-auto"
+          >
+            {JSON.stringify(tool.schema, null, 2)}
+          </pre>
+          {/* Tool metadata */}
+          <div className="flex flex-wrap gap-3 mt-2 text-[10px] text-foreground-subtle">
+            <span className="flex items-center gap-1">
+              <span className="text-foreground-muted">Capabilities:</span>
+              <span>{tool.capabilities.join(', ') || 'none'}</span>
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="text-foreground-muted">Parallel:</span>
+              <span>{tool.supportsParallel ? 'Yes' : 'No'}</span>
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="text-foreground-muted">Read-only:</span>
+              <span>{tool.isReadOnly ? 'Yes' : 'No'}</span>
+            </span>
+            {tool.lastUsed && (
+              <span className="flex items-center gap-1">
+                <span className="text-foreground-muted">Last used:</span>
+                <span>{new Date(tool.lastUsed).toLocaleString()}</span>
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

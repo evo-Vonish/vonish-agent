@@ -1,0 +1,59 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "name": "web_search",
+  "description": "Search the web for information. Returns search results with titles, URLs, and snippets.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Search query string"
+      },
+      "num_results": {
+        "type": "integer",
+        "description": "Number of results to return (default: 5, max: 20)",
+        "default": 5,
+        "minimum": 1,
+        "maximum": 20
+      },
+      "source": {
+        "type": "string",
+        "enum": ["general", "news", "academic"],
+        "description": "Search source type (default: general)",
+        "default": "general"
+      }
+    },
+    "required": ["query"]
+  },
+  "returns": {
+    "type": "object",
+    "properties": {
+      "results": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            },
+            "snippet": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "total_results": {
+        "type": "integer"
+      },
+      "query": {
+        "type": "string"
+      }
+    }
+  }
+}
