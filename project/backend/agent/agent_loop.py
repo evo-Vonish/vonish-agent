@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, AsyncGenerator
 
 from agent.model_adapter import (
@@ -49,9 +49,17 @@ class AgentLoopConfig(BaseModel):
 class ResourceRef(BaseModel):
     """Reference to a resource attached to the conversation."""
 
+    model_config = ConfigDict(populate_by_name=True)
+
     uri: str
-    mime_type: str
+    mime_type: str = Field(default="", alias="mimeType")
     title: str = ""
+    original_name: str = Field(default="", alias="originalName")
+    workspace_path: str = Field(default="", alias="workspacePath")
+    context_text: str = Field(default="", alias="contextText")
+    context_policy: str = Field(default="none", alias="contextPolicy")
+    status: str = ""
+    error: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -122,6 +130,7 @@ class AgentLoop:
         enable_thinking: bool | None = None,
         api_key: str | None = None,
         api_base: str | None = None,
+        context_profile: str = "balanced",
         system_prompt: str | None = None,
     ) -> AsyncGenerator[str, None]:
         """Run the agent loop and yield SSE events.
@@ -146,6 +155,10 @@ class AgentLoop:
             api_key=api_key,
             api_base=api_base,
         )
+        normalized_resources = [
+            item if isinstance(item, ResourceRef) else ResourceRef.model_validate(item)
+            for item in (resources or [])
+        ]
 
         try:
             yield sse_event("message_start", {"message_id": loop_id})
@@ -155,7 +168,8 @@ class AgentLoop:
                 conversation_id=conversation_id,
                 user_input=user_input,
                 model_id=model_id,
-                resources=resources,
+                resources=normalized_resources,
+                context_profile=context_profile,
                 system_prompt=system_prompt,
             )
 
@@ -255,7 +269,16 @@ class AgentLoop:
                         accumulated_text += str(content or "")
                         # Stream text immediately — with native tool_calls,
                         # text and tool_calls are mutually exclusive
-                        yield sse_event("text_delta", {"content": str(content or "")})
+                        clean = str(content or "")
+                        # Strip leaked XML tool-call artifacts (reasoning_effort max side-effect)
+                        if clean.strip().startswith("<") and any(tag in clean for tag in ("</invoke>", "<invoke", "</tool_calls>", "<tool_calls>", "<parameter")):
+                            import re
+                            clean = re.sub(r'</?tool_calls>', '', clean)
+                            clean = re.sub(r'<invoke[^>]*>|</invoke>', '', clean)
+                            clean = re.sub(r'<parameter[^>]*/?>', '', clean)
+                            if not clean.strip():
+                                continue
+                        yield sse_event("text_delta", {"content": clean})
 
                     elif chunk_type == "usage":
                         usage = chunk.get("usage")
@@ -392,16 +415,16 @@ class AgentLoop:
         user_input: str,
         model_id: str,
         resources: list[ResourceRef] | None,
+        context_profile: str,
         system_prompt: str | None,
     ) -> "AgentContext":
-        """Build agent context using PromptBuilder for tool-aware prompts.
+        """Build agent context using ContextBuilder for budget-aware prompts.
 
         Only enabled tools get prompt blocks AND API schemas.
         Disabled tools are invisible to the model.
         """
         from agent.tool_registry import ToolRegistry
         from api.prompt import get_enabled_tools
-        from prompt.prompt_builder import PromptBuilder
 
         # Determine which tools are enabled
         enabled_names = get_enabled_tools() if system_prompt is None else []
@@ -409,22 +432,43 @@ class AgentLoop:
         if system_prompt:
             prompt = system_prompt
             enabled_names = list(ToolRegistry().list_all())
+            history_messages = await self._get_conversation_history(conversation_id)
+            messages = history_messages + [MessageBlock(role="user", content=user_input)]
+            registry = ToolRegistry()
+            all_schemas = registry.list_for_json_schema()
+            enabled_schemas = [
+                t for t in all_schemas
+                if t["function"]["name"] in enabled_names
+            ]
         else:
-            builder = PromptBuilder()
-            built = builder.build(enabled_tools=enabled_names, model_id=model_id)
-            prompt = built.content
+            from context.context_builder import ContextBuilder
 
-        # Only pass enabled tool schemas to the model
-        registry = ToolRegistry()
-        all_schemas = registry.list_for_json_schema()
-        enabled_schemas = [
-            t for t in all_schemas
-            if t["function"]["name"] in enabled_names
-        ]
-
-        history_messages = await self._get_conversation_history(conversation_id)
-        current_message = MessageBlock(role="user", content=user_input)
-        messages = history_messages + [current_message]
+            builder = ContextBuilder()
+            built = await builder.build(
+                conversation_id=conversation_id,
+                user_query=user_input,
+                model_id=model_id,
+                profile_name=context_profile,
+            )
+            prompt = self._append_resource_context(built.system_prompt, resources or [])
+            messages = []
+            for msg in built.messages:
+                if msg.get("role") == "system":
+                    continue
+                messages.append(
+                    MessageBlock(
+                        role=str(msg.get("role", "user")),
+                        content=msg.get("content"),
+                        thinking_content=msg.get("thinking_content"),
+                        tool_calls=msg.get("tool_calls"),
+                        tool_call_id=msg.get("tool_call_id"),
+                    )
+                )
+            enabled_schemas = [
+                item
+                for item in built.tools
+                if isinstance(item, dict) and isinstance(item.get("function"), dict)
+            ]
 
         return AgentContext(
             messages=messages,
@@ -438,7 +482,34 @@ class AgentLoop:
                 for t in enabled_schemas
             ],
             conversation_id=conversation_id,
+            model_id=model_id,
+            context_profile=context_profile,
+            resources=resources or [],
         )
+
+    def _append_resource_context(self, system_prompt: str, resources: list[ResourceRef]) -> str:
+        """Append uploaded file context to the system prompt."""
+        if not resources:
+            return system_prompt
+
+        lines: list[str] = [
+            "",
+            "## Uploaded Files",
+            "The user uploaded files for this turn. Files are saved inside the current workspace and can be read with file tools.",
+        ]
+
+        for resource in resources:
+            name = resource.original_name or resource.title or resource.workspace_path or resource.uri
+            path = resource.workspace_path or resource.uri
+            lines.append(
+                f"- {name} ({resource.mime_type or 'unknown'}, status: {resource.status or 'uploaded'}, path: {path})"
+            )
+            if resource.error:
+                lines.append(f"  Parse note: {resource.error}")
+            if resource.context_text:
+                lines.append(resource.context_text)
+
+        return f"{system_prompt}\n" + "\n".join(lines)
 
     async def _execute_native_tool_calls(
         self,
@@ -585,6 +656,46 @@ class AgentLoop:
                 )
             )
 
+        return context
+
+    async def _update_context_with_results(
+        self,
+        context: "AgentContext",
+        assistant_content: str,
+        tool_results: list[ToolCallResult],
+    ) -> "AgentContext":
+        """Compatibility path for text/XML tool-call flows.
+
+        Native tool calls use role="tool" messages. Older parser-driven flows
+        feed a compact tool-result JSON block back as a user message.
+        """
+        context.messages.append(
+            MessageBlock(
+                role="assistant",
+                content=assistant_content,
+            )
+        )
+        payload = [
+            {
+                "call_id": result.call_id,
+                "tool": result.tool_name,
+                "success": result.success,
+                "result": result.result if result.success else None,
+                "error": result.error_message if not result.success else None,
+                "duration_ms": result.execution_time_ms,
+            }
+            for result in tool_results
+        ]
+        context.messages.append(
+            MessageBlock(
+                role="user",
+                content=(
+                    "Tool execution results:\n"
+                    f"{json.dumps(payload, ensure_ascii=False, default=str)}\n\n"
+                    "Use these results to continue the answer."
+                ),
+            )
+        )
         return context
 
     async def _get_conversation_history(
