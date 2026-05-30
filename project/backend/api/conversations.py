@@ -258,6 +258,7 @@ class MessageItem(BaseModel):
     thinking: str | None = None
     segments: list[dict[str, Any]] | None = None
     tool_calls: list[dict[str, Any]] | None = None
+    files: list[dict[str, Any]] | None = None
     timestamp: str
 
 
@@ -310,6 +311,16 @@ def _extract_tool_calls(content: list[dict] | None) -> list[dict[str, Any]] | No
     for block in content:
         if block.get("type") == "tool_calls" and isinstance(block.get("tool_calls"), list):
             return block["tool_calls"]
+    return None
+
+
+def _extract_files(content: list[dict] | None) -> list[dict[str, Any]] | None:
+    """Extract files attached to a message."""
+    if not content:
+        return None
+    for block in content:
+        if block.get("type") == "files" and isinstance(block.get("files"), list):
+            return block["files"]
     return None
 
 
@@ -370,6 +381,7 @@ async def get_conversation_messages(
             thinking=m.thinking_content,
             segments=_extract_segments(m.content),
             tool_calls=_extract_tool_calls(m.content),
+            files=_extract_files(m.content),
             timestamp=m.created_at.isoformat() if m.created_at else "",
         )
         for m in msgs
@@ -450,6 +462,126 @@ async def search_conversations(
         )
 
     return ConversationSearchResponse(results=results, total=len(results))
+
+
+# ── Export ──────────────────────────────────────────────────────────────────
+
+class ExportRequest(BaseModel):
+    format: str = Field(default="md", description="Export format: md, txt, docx")
+    anonymize: bool = Field(default=False)
+    includeBasicInfo: bool = Field(default=True)
+    includeUserMessages: bool = Field(default=True)
+    includeAssistantMessages: bool = Field(default=True)
+    includeThinking: bool = Field(default=True)
+    includeToolPayload: bool = Field(default=True)
+    includeToolResult: bool = Field(default=True)
+    includeToolErrors: bool = Field(default=True)
+    includeAttachments: bool = Field(default=True)
+    includeWorkspace: bool = Field(default=True)
+    includeContextSummary: bool = Field(default=True)
+    includeSystemEvents: bool = Field(default=True)
+    customTitle: str | None = None
+    includeSyncing: bool = Field(default=True)
+
+
+def _anonymize(text: str, conversation_id: str) -> str:
+    import re as _re
+    text = _re.sub(r'[F-Zf-z]:[\\/].+?workspaces[\\/][^ \n\r,;:"]+', '<LOCAL_WORKSPACE_PATH>', text)
+    text = _re.sub(r'[A-Za-z]:[\\/][^\n ]{10,}', '<LOCAL_PATH>', text)
+    text = _re.sub(r'[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}', '<UUID>', text, flags=_re.IGNORECASE)
+    text = text.replace(conversation_id, '<CONVERSATION_ID>')
+    return text
+
+
+def _format_md(conversation: Conversation, msgs: list[Message], opts: dict) -> str:
+    title = opts.get("customTitle") or conversation.title
+    now = __import__("datetime").datetime.now(conversation.created_at.tzinfo).isoformat()
+    lines = [
+        f"# 会话导出 — {title}",
+        "",
+    ]
+    if opts.get("includeBasicInfo"):
+        lines += [
+            "## 基础信息",
+            "",
+            f"- 会话标题: {title}",
+            f"- 会话 ID: <CONVERSATION_ID>" if opts["anonymize"] else f"- 会话 ID: {conversation.id}",
+            f"- 创建时间: {conversation.created_at.isoformat() if conversation.created_at else '—'}",
+            f"- 导出时间: {now}",
+            f"- 模型: {conversation.model}",
+            f"- 匿名化: {'是' if opts['anonymize'] else '否'}",
+            "",
+            "---",
+            "",
+        ]
+    for i, m in enumerate(msgs):
+        text = _extract_text(m.content)
+        if opts.get("anonymize"):
+            text = _anonymize(text, str(conversation.id))
+        lines += [
+            f"### Message {i + 1}",
+            "",
+            f"**角色**: {m.role}",
+            f"**时间**: {m.created_at.isoformat() if m.created_at else '—'}",
+            "",
+        ]
+        if text:
+            lines += [text, ""]
+        if opts.get("includeThinking") and m.thinking_content:
+            thinking = m.thinking_content
+            if opts.get("anonymize"):
+                thinking = _anonymize(thinking, str(conversation.id))
+            lines += ["**Thinking**:", "", thinking, ""]
+        lines += ["---", ""]
+    return "\n".join(lines)
+
+
+def _format_txt(conversation: Conversation, msgs: list[Message], opts: dict) -> str:
+    # Simple TXT — reuse MD but strip markdown artifacts
+    md = _format_md(conversation, msgs, opts)
+    return md.replace("# ", "").replace("**", "").replace("```", "")
+
+
+@router.post("/conversations/{conversation_id}/export")
+async def export_conversation(
+    conversation_id: str,
+    request: ExportRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    conv_id = UUID(conversation_id)
+    q = select(Conversation).where(Conversation.id == conv_id)
+    conv = (await db.execute(q)).scalar()
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    msgs_q = (
+        select(Message)
+        .where(Message.conversation_id == conv_id)
+        .order_by(Message.created_at.asc())
+    )
+    msgs = (await db.execute(msgs_q)).scalars().all()
+
+    opts = request.model_dump()
+    if request.format == "txt":
+        content = _format_txt(conv, msgs, opts)
+        mime = "text/plain"
+        ext = "txt"
+    else:
+        content = _format_md(conv, msgs, opts)
+        mime = "text/markdown" if request.format == "md" else "text/markdown"
+        ext = "md"
+
+    safe_title = "".join(c for c in (request.customTitle or conv.title or "export") if c.isalnum() or c in " _-")[:40]
+    ts = __import__("datetime").datetime.now().strftime("%Y%m%d_%H%M")
+    filename = f"{safe_title}_{ts}.{ext}"
+
+    from fastapi.responses import Response
+    return Response(
+        content=content,
+        media_type=mime,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # Keep backward-compat alias for chat.py

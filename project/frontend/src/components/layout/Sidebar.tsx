@@ -8,6 +8,7 @@ import {
   FileText,
   Folder,
   Trash2,
+  Download,
   ChevronLeft,
   ChevronRight as ChevronRightIcon,
   X,
@@ -111,11 +112,50 @@ export function Sidebar({ className }: SidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'chats' | 'files'>('chats');
   const [deleteMenuOpen, setDeleteMenuOpen] = useState<string | null>(null);
+  const [exportOpen, setExportOpen] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportFormat, setExportFormat] = useState('md');
+  const [anonymize, setAnonymize] = useState(false);
   const [renameOpen, setRenameOpen] = useState<string | null>(null);
   const [renameText, setRenameText] = useState('');
   const [searchResults, setSearchResults] = useState<ConversationSearchResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const handleExport = async () => {
+    if (!exportOpen) return;
+    setExporting(true);
+    try {
+      const params = new URLSearchParams({
+        format: exportFormat,
+        anonymize: String(anonymize),
+        customTitle: conversations.find(c => c.id === exportOpen)?.title || 'conversation',
+      });
+      const response = await fetch(`/api/conversations/${exportOpen}/export`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          format: exportFormat,
+          anonymize,
+          customTitle: conversations.find(c => c.id === exportOpen)?.title || 'conversation',
+        }),
+      });
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const disposition = response.headers.get('Content-Disposition') || '';
+        const match = disposition.match(/filename="(.+)"/);
+        a.download = match?.[1] || `export.${exportFormat}`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    } catch {} finally {
+      setExporting(false);
+      setExportOpen(null);
+    }
+  };
+
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const renameRef = useRef<HTMLInputElement>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -515,17 +555,29 @@ export function Sidebar({ className }: SidebarProps) {
                     )}
                   </div>
 
-                  {/* Delete button */}
-                  <div className="relative">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDeleteMenuOpen(deleteMenuOpen === conv.id ? null : conv.id);
-                      }}
-                      className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-error/20 hover:text-error transition-all"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
+                {/* Export button */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setExportOpen(conv.id);
+                  }}
+                  className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-primary/20 hover:text-primary transition-all"
+                  title={t('chat.export')}
+                >
+                  <Download className="w-3 h-3" />
+                </button>
+
+                {/* Delete button */}
+                <div className="relative">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDeleteMenuOpen(deleteMenuOpen === conv.id ? null : conv.id);
+                    }}
+                    className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-error/20 hover:text-error transition-all"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
 
                     {/* Confirmation popover */}
                     {deleteMenuOpen === conv.id && (
@@ -561,6 +613,61 @@ export function Sidebar({ className }: SidebarProps) {
                 </div>
               );
             })}
+          </div>
+        </>
+      )}
+
+      {/* Export modal */}
+      {exportOpen && (
+        <>
+          <div className="fixed inset-0 bg-black/50 z-50" onClick={() => setExportOpen(null)} />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setExportOpen(null)}>
+            <div className="bg-surface-elevated border border-border rounded-xl shadow-2xl w-full max-w-sm p-4 space-y-3 animate-in fade-in zoom-in-95 duration-150" onClick={(e) => e.stopPropagation()}>
+              <h3 className="text-sm font-semibold text-foreground">{t('chat.export')}</h3>
+
+              <div className="space-y-2">
+                {/* Format */}
+                <div>
+                  <p className="text-[10px] text-foreground-muted mb-1">{t('chat.exportFormat')}</p>
+                  <div className="flex gap-1.5">
+                    {['md', 'txt'].map((f) => (
+                      <button
+                        key={f}
+                        onClick={() => setExportFormat(f)}
+                        className={cn(
+                          'px-3 py-1 rounded-md text-xs border transition-colors',
+                          exportFormat === f
+                            ? 'border-primary/50 bg-primary/10 text-primary'
+                            : 'border-border text-foreground-muted hover:bg-surface-hover'
+                        )}
+                      >
+                        {f === 'md' ? 'Markdown' : 'TXT'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Anonymize */}
+                <label className="flex items-center gap-2 text-xs text-foreground-muted cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={anonymize}
+                    onChange={(e) => setAnonymize(e.target.checked)}
+                    className="rounded border-border"
+                  />
+                  {t('chat.anonymize')}
+                </label>
+
+                {/* Export button */}
+                <button
+                  onClick={handleExport}
+                  disabled={exporting}
+                  className="w-full py-2 rounded-lg bg-primary text-white text-xs font-medium hover:bg-primary-hover disabled:opacity-50 transition-colors"
+                >
+                  {exporting ? t('chat.exporting') : t('chat.exportDo')}
+                </button>
+              </div>
+            </div>
           </div>
         </>
       )}
