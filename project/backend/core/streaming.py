@@ -35,6 +35,13 @@ SSE_EVENT_TYPES = {
     "message_end",
     "error",
     "aborted",
+    # Human Interaction events
+    "interaction_required",
+    "agent_paused",
+    "agent_resumed",
+    "todo_updated",
+    "approval_requested",
+    "ask_requested",
 }
 
 
