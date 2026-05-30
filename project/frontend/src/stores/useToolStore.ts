@@ -1,11 +1,12 @@
 import { create } from 'zustand';
-import type { ToolDefinition, ToolCategoryType } from '@/types/tools';
-import { fetchToolConfigs, enableTool, disableTool } from '@/services/api';
+import type { ToolDefinition, ToolCategoryType, ToolCapability, ApprovalLevel } from '@/types/tools';
+import { fetchToolConfigs, enableTool, disableTool, listTools } from '@/services/api';
 
 interface ToolState {
   tools: ToolDefinition[];
   toggleTool: (name: string) => void;
   syncFromBackend: () => Promise<void>;
+  loadToolsFromBackend: () => Promise<void>;
   enableCategory: (category: ToolCategoryType) => void;
   disableCategory: (category: ToolCategoryType) => void;
   getEnabledTools: () => ToolDefinition[];
@@ -40,7 +41,7 @@ const mockTools: ToolDefinition[] = [
     useCount: 1243,
   },
   {
-    name: 'write_file',
+    name: 'write_to_file',
     description: 'Create or overwrite files in the workspace',
     category: 'file_ops',
     capabilities: ['writes_files'],
@@ -297,6 +298,35 @@ export const useToolStore = create<ToolState>((set, get) => ({
           t.name === name ? { ...t, isEnabled: !newState } : t
         ),
       }));
+    }
+  },
+
+  loadToolsFromBackend: async () => {
+    try {
+      const { tools: backendTools } = await listTools();
+      const mapped: ToolDefinition[] = backendTools.map((t) => ({
+        name: t.name,
+        description: t.description,
+        category: t.category as ToolCategoryType,
+        capabilities: (t.requires_confirmation
+          ? ['requires_approval']
+          : ['read_only']) as ToolCapability[],
+        approvalLevel: (t.requires_confirmation
+          ? 'required'
+          : t.category === 'file_ops'
+            ? 'suggest'
+            : 'auto') as ApprovalLevel,
+        isEnabled: true,
+        isReadOnly: !t.requires_confirmation,
+        supportsParallel: true,
+        schema: t.schema,
+        useCount: 0,
+      }));
+      set({ tools: mapped });
+      // Sync enabled states from backend config
+      await get().syncFromBackend();
+    } catch {
+      // Keep current state if backend unavailable
     }
   },
 

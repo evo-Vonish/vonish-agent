@@ -78,12 +78,17 @@ async def list_workspace_files(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """List files in the workspace."""
+    """List files in the workspace. Returns empty list if workspace not yet created."""
+    from workspace.workspace_manager import WorkspaceError
+
     manager = get_workspace_manager()
-    if recursive:
-        files = await manager.list_files_recursive(conversation_id, path or "")
-    else:
-        files = await manager.list_files(conversation_id, path or "")
+    try:
+        if recursive:
+            files = await manager.list_files_recursive(conversation_id, path or "")
+        else:
+            files = await manager.list_files(conversation_id, path or "")
+    except WorkspaceError:
+        return {"files": [], "workspace_id": conversation_id, "path": path or "", "recursive": recursive}
 
     return {
         "files": [
