@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Check,
   Cpu,
-  Gauge,
   KeyRound,
   Pencil,
   Plus,
@@ -17,10 +16,8 @@ import { cn } from '@/lib/utils';
 import { useChatStore } from '@/stores/chatStore';
 import { useToolStore } from '@/stores/useToolStore';
 import { useUIStore } from '@/stores/uiStore';
-import { Progress } from '@/components/ui/Progress';
 import { AddToolModal } from '@/components/tools/AddToolModal';
 import { ToolCategorySection } from '@/components/tools/ToolCategorySection';
-import type { ContextProfile } from '@/types';
 import type { ToolCategoryType } from '@/types/tools';
 import {
   type ApiConfig,
@@ -36,7 +33,7 @@ interface ContextManagerPanelProps {
 }
 
 type Provider = 'deepseek' | 'kimi';
-type Tab = 'api' | 'tools' | 'context';
+type Tab = 'api' | 'tools';
 
 const toolCategoryOrder: ToolCategoryType[] = ['file_ops', 'workspace', 'web_search', 'system'];
 
@@ -115,7 +112,6 @@ export function ContextManagerPanel({ className }: ContextManagerPanelProps) {
   const [form, setForm] = useState(emptyForm);
   const [toolSearchQuery, setToolSearchQuery] = useState('');
   const [showAddToolModal, setShowAddToolModal] = useState(false);
-
   const editing = Boolean(form.id);
   const enabledToolCount = tools.filter((tool) => tool.isEnabled).length;
   const visibleToolCategories = useMemo(
@@ -243,12 +239,6 @@ export function ContextManagerPanel({ className }: ContextManagerPanelProps) {
     }
   };
 
-  const compressionLevels: Array<{ value: ContextProfile['compressionLevel']; label: string }> = [
-    { value: 'none', label: '无压缩' },
-    { value: 'light', label: '轻度' },
-    { value: 'medium', label: '中度' },
-    { value: 'aggressive', label: '激进' },
-  ];
 
   return (
     <div className={cn('h-full flex flex-col', className)}>
@@ -288,17 +278,6 @@ export function ContextManagerPanel({ className }: ContextManagerPanelProps) {
           )}
         >
           工具
-        </button>
-        <button
-          onClick={() => setActiveTab('context')}
-          className={cn(
-            'flex-1 px-2 py-2 text-xs font-medium border-b-2 transition-colors',
-            activeTab === 'context'
-              ? 'border-primary text-foreground'
-              : 'border-transparent text-foreground-muted hover:text-foreground',
-          )}
-        >
-          上下文
         </button>
       </div>
 
@@ -545,53 +524,6 @@ export function ContextManagerPanel({ className }: ContextManagerPanelProps) {
         </div>
       )}
 
-      {activeTab === 'context' && (
-        <div className="flex-1 overflow-y-auto p-3 space-y-4">
-          <div className="flex items-center gap-2 text-xs text-foreground-muted">
-            <Gauge className="w-4 h-4 text-primary" />
-            <span>
-              Profile: <span className="text-foreground font-medium">{contextProfile.name}</span>
-            </span>
-          </div>
-
-          <div className="bg-surface-hover rounded-lg">
-            <TokenGauge used={contextProfile.tokenUsed} budget={contextProfile.tokenBudget} />
-          </div>
-
-          <Progress
-            value={contextProfile.tokenUsed}
-            max={contextProfile.tokenBudget}
-            label="Token 占用"
-            size="sm"
-            variant={contextProfile.tokenUsed / contextProfile.tokenBudget > 0.8 ? 'warning' : 'default'}
-          />
-
-          <div>
-            <h4 className="text-xs font-medium text-foreground-muted mb-2">压缩档位</h4>
-            <div className="grid grid-cols-2 gap-1.5">
-              {compressionLevels.map((level) => (
-                <button
-                  key={level.value}
-                  onClick={() =>
-                    setContextProfile({
-                      ...contextProfile,
-                      compressionLevel: level.value,
-                    })
-                  }
-                  className={cn(
-                    'rounded-md border px-2.5 py-1.5 text-xs transition-colors',
-                    contextProfile.compressionLevel === level.value
-                      ? 'border-primary/50 bg-primary/10 text-primary'
-                      : 'border-border text-foreground-muted hover:bg-surface-hover hover:text-foreground',
-                  )}
-                >
-                  {level.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
