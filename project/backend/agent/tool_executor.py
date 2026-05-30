@@ -292,11 +292,16 @@ class ToolExecutor:
         """Get a default handler for a tool if no custom one is registered."""
         default_handlers: dict[str, Callable[..., Awaitable[Any]]] = {
             "read_file": self._handle_read_file,
+            "file_read": self._handle_file_read,
             "edit_file": self._handle_edit_file,
             "shell_command": self._handle_shell_command,
             "ipython": self._handle_ipython,
             "web_fetch": self._handle_web_fetch,
             "web_search": self._handle_web_search,
+            "delete_file": self._handle_delete_file,
+            "apply_patch": self._handle_apply_patch,
+            "list_directory": self._handle_list_directory,
+            "snapshot": self._handle_snapshot,
         }
         return default_handlers.get(tool_name)
 
@@ -365,13 +370,23 @@ class ToolExecutor:
         self,
         command: str,
         timeout: int = 30,
+        cwd: str = "",
         conversation_id: str = "",
         **_: Any,
     ) -> dict[str, Any]:
         workspace = self._workspace_dir(conversation_id)
+        work_dir = (workspace / cwd).resolve() if cwd else workspace
+        if not str(work_dir).startswith(str(workspace)):
+            return {
+                "success": False,
+                "command": command,
+                "error": f"cwd path escape blocked: {cwd}",
+            }
+        work_dir.mkdir(parents=True, exist_ok=True)
+
         process = await asyncio.create_subprocess_shell(
             command,
-            cwd=str(workspace),
+            cwd=str(work_dir),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -387,16 +402,27 @@ class ToolExecutor:
                 "success": False,
                 "command": command,
                 "error": f"Command timed out after {timeout}s",
-                "cwd": str(workspace),
+                "cwd": str(work_dir),
             }
+
+        stdout_str = stdout.decode("utf-8", errors="replace")[:20000]
+        stderr_str = stderr.decode("utf-8", errors="replace")[:20000]
+
+        if process.returncode != 0 and not stderr_str and not stdout_str:
+            stderr_str = (
+                f"Command exited with code {process.returncode} and no output. "
+                "The command may not exist or is not in PATH. "
+                "On Windows, use PowerShell commands like 'Get-ChildItem' "
+                "instead of Unix commands like 'ls'."
+            )
 
         return {
             "success": process.returncode == 0,
             "command": command,
             "exit_code": process.returncode,
-            "stdout": stdout.decode("utf-8", errors="replace")[:20000],
-            "stderr": stderr.decode("utf-8", errors="replace")[:20000],
-            "cwd": str(workspace),
+            "stdout": stdout_str,
+            "stderr": stderr_str,
+            "cwd": str(work_dir),
         }
 
     async def _handle_ipython(
@@ -606,6 +632,146 @@ class ToolExecutor:
             "results": results,
             "stats": data.get("stats", {}),
             "source": "web-search_pipeline",
+        }
+
+    # ── File Read (with encoding) ──────────────────────────────────────
+
+    async def _handle_file_read(
+        self,
+        path: str,
+        encoding: str = "utf-8",
+        start_line: int = 1,
+        max_lines: int = 500,
+        conversation_id: str = "",
+        **_: Any,
+    ) -> Any:
+        if encoding == "base64":
+            import base64
+            workspace = self._workspace_dir(conversation_id)
+            fp = (workspace / path).resolve()
+            if not str(fp).startswith(str(workspace)):
+                return {"success": False, "path": path, "error": "Path escape blocked"}
+            if not fp.is_file():
+                return {"success": False, "path": path, "error": "File not found"}
+            try:
+                data = fp.read_bytes()
+                encoded = base64.b64encode(data).decode("ascii")
+                return {
+                    "success": True,
+                    "path": path,
+                    "encoding": "base64",
+                    "data": encoded,
+                    "size": len(data),
+                }
+            except Exception as e:
+                return {"success": False, "path": path, "error": str(e)}
+
+        # Default: use _handle_read_file
+        return await self._handle_read_file(
+            path=path, start_line=start_line, max_lines=max_lines, conversation_id=conversation_id
+        )
+
+    # ── Delete File ────────────────────────────────────────────────────
+
+    async def _handle_delete_file(
+        self,
+        path: str,
+        conversation_id: str = "",
+        **_: Any,
+    ) -> Any:
+        from tools.file_tools import DeleteFileTool
+        result = await DeleteFileTool().execute(self._tool_context(conversation_id), path=path)
+        return self._tool_result_payload(result)
+
+    # ── Apply Patch ────────────────────────────────────────────────────
+
+    async def _handle_apply_patch(
+        self,
+        patch: str,
+        conversation_id: str = "",
+        **_: Any,
+    ) -> Any:
+        from tools.file_tools import ApplyPatchTool
+        result = await ApplyPatchTool().execute(self._tool_context(conversation_id), patch=patch)
+        return self._tool_result_payload(result)
+
+    # ── List Directory ─────────────────────────────────────────────────
+
+    async def _handle_list_directory(
+        self,
+        path: str = "",
+        recursive: bool = False,
+        conversation_id: str = "",
+        **_: Any,
+    ) -> dict[str, Any]:
+        workspace = self._workspace_dir(conversation_id)
+        target = (workspace / path).resolve() if path else workspace
+        if not str(target).startswith(str(workspace)):
+            return {"success": False, "error": "Path escape blocked"}
+        if not target.is_dir():
+            return {"success": False, "error": f"Not a directory: {path}"}
+
+        entries: list[dict] = []
+        if recursive:
+            for root, dirs, files in __import__("os").walk(str(target)):
+                rel_root = str(Path(root).relative_to(workspace)).replace("\\", "/")
+                if rel_root == ".":
+                    rel_root = ""
+                for d in dirs:
+                    entries.append({"name": d, "path": f"{rel_root}/{d}".lstrip("/"), "type": "folder"})
+                for f in files:
+                    fp = Path(root) / f
+                    entries.append({
+                        "name": f,
+                        "path": f"{rel_root}/{f}".lstrip("/"),
+                        "type": "file",
+                        "size": fp.stat().st_size if fp.exists() else 0,
+                    })
+        else:
+            for item in sorted(target.iterdir()):
+                rel = str(item.relative_to(workspace)).replace("\\", "/")
+                entry: dict = {"name": item.name, "path": rel, "type": "folder" if item.is_dir() else "file"}
+                if item.is_file():
+                    entry["size"] = item.stat().st_size
+                entries.append(entry)
+
+        return {"success": True, "path": path or ".", "entries": entries, "count": len(entries)}
+
+    # ── Workspace Snapshot ─────────────────────────────────────────────
+
+    async def _handle_snapshot(
+        self,
+        include_files: bool = True,
+        conversation_id: str = "",
+        **_: Any,
+    ) -> dict[str, Any]:
+        workspace = self._workspace_dir(conversation_id)
+        files: list[dict] = []
+        total_size = 0
+        if include_files:
+            for root, dirs, filenames in __import__("os").walk(str(workspace)):
+                dirs[:] = [d for d in dirs if not d.startswith(".") and d != "__pycache__"]
+                for f in filenames:
+                    fp = Path(root) / f
+                    try:
+                        st = fp.stat()
+                        files.append({
+                            "path": str(fp.relative_to(workspace)).replace("\\", "/"),
+                            "size": st.st_size,
+                            "modified_at": __import__("datetime").datetime.fromtimestamp(
+                                st.st_mtime
+                            ).isoformat(),
+                        })
+                        total_size += st.st_size
+                    except OSError:
+                        pass
+
+        return {
+            "success": True,
+            "workspace": str(workspace),
+            "file_count": len(files),
+            "total_size": total_size,
+            "files": files[:200],
         }
 
 

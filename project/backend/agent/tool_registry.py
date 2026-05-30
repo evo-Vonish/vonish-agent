@@ -300,6 +300,10 @@ def register_default_tools() -> None:
                         "type": "string",
                         "description": "Shell command to execute",
                     },
+                    "cwd": {
+                        "type": "string",
+                        "description": "Working directory within workspace (relative path, default: workspace root)",
+                    },
                     "timeout": {
                         "type": "integer",
                         "description": "Timeout in seconds",
@@ -448,6 +452,142 @@ def register_default_tools() -> None:
                 "required": ["url"],
             },
             category="web_ops",
+        )
+    )
+
+    # List Directory
+    registry.register(
+        ToolDefinition(
+            name="list_directory",
+            description="List files and directories in the workspace. Supports recursive listing up to a configurable depth.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Directory path relative to workspace root (default: root)",
+                        "default": "",
+                    },
+                    "recursive": {
+                        "type": "boolean",
+                        "description": "Whether to list recursively",
+                        "default": False,
+                    },
+                },
+            },
+            category="workspace",
+        )
+    )
+
+    # Delete File
+    registry.register(
+        ToolDefinition(
+            name="delete_file",
+            description=(
+                "Delete a file in the workspace. Cannot delete the workspace root "
+                "or .workspace/ system directory. Returns file content hash for "
+                "potential recovery. Requires confirmation."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "File path relative to workspace root",
+                    },
+                },
+                "required": ["path"],
+            },
+            category="file_ops",
+            requires_confirmation=True,
+        )
+    )
+
+    # Apply Patch
+    registry.register(
+        ToolDefinition(
+            name="apply_patch",
+            description=(
+                "Apply a unified diff patch string to one or more files. "
+                "Supports multi-file patches and multi-hunk patches. "
+                "All changes are transactional — if any hunk fails, "
+                "everything is rolled back."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "patch": {
+                        "type": "string",
+                        "description": "Unified diff patch string to apply",
+                    },
+                },
+                "required": ["patch"],
+            },
+            category="file_ops",
+            requires_confirmation=True,
+        )
+    )
+
+    # File Read (enhanced with encoding)
+    registry.register(
+        ToolDefinition(
+            name="file_read",
+            description=(
+                "Read a file from workspace with encoding support. "
+                "For text files (default utf-8), returns the text content. "
+                "For binary files or when encoding='base64', returns base64-encoded data. "
+                "Supports line offset and limit for pagination."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "File path relative to workspace root",
+                    },
+                    "encoding": {
+                        "type": "string",
+                        "enum": ["utf-8", "base64"],
+                        "description": "Encoding to use for reading",
+                        "default": "utf-8",
+                    },
+                    "start_line": {
+                        "type": "integer",
+                        "description": "Starting line number (1-based)",
+                        "default": 1,
+                    },
+                    "max_lines": {
+                        "type": "integer",
+                        "description": "Maximum number of lines to read",
+                        "default": 500,
+                    },
+                },
+                "required": ["path"],
+            },
+            category="file_ops",
+        )
+    )
+
+    # Workspace Snapshot
+    registry.register(
+        ToolDefinition(
+            name="snapshot",
+            description=(
+                "Take a snapshot of the workspace file tree. "
+                "Returns a list of files with their sizes and modification times. "
+                "Useful for tracking changes before/after code execution."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "include_files": {
+                        "type": "boolean",
+                        "description": "Whether to include the file list in the result",
+                        "default": True,
+                    },
+                },
+            },
+            category="workspace",
         )
     )
 
