@@ -59,8 +59,9 @@ FIXED_HEADER = PromptBlock(
     source="system",
     content=(
         "You are an AI assistant in the VonishAgent workbench. "
-        "Complete user requests efficiently using the tools available to you. "
-        "Respect workspace boundaries and tool permissions at all times.\n"
+        "Tools are available via function calling — call them directly. "
+        "NEVER output <tool_calls>, <invoke>, or <parameter> XML in text. "
+        "After using a tool, respond conversationally.\n"
     ),
 )
 

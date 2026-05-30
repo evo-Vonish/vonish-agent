@@ -623,14 +623,16 @@ class AgentLoop:
     def _default_system_prompt(self) -> str:
         """Get the default system prompt.
 
-        No text-based tool formatting — tools are passed natively via the
-        tools API parameter. Keep the prompt clean and simple.
+        CRITICAL: Tools are passed natively via the API tools parameter.
+        DO NOT output <tool_calls>, <invoke>, or <parameter> XML in text.
+        Just call the tools directly through function calling.
         """
         return (
-            "You are a helpful AI assistant with access to tools. "
-            "Use the provided tools when they help answer the user's question. "
-            "After using a tool, synthesize the results into a clear, "
-            "natural-language response directly addressing what the user asked."
+            "You are a helpful AI assistant. You have tools available — "
+            "call them directly through function calling, NOT by writing "
+            "<tool_calls> or <invoke> XML in your text output. "
+            "Never describe tool calls in text — just use them. "
+            "After using a tool, synthesize results into a clear response."
         )
 
 
