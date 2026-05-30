@@ -69,7 +69,7 @@ export function TopBar({ className }: TopBarProps) {
         <span className="text-xs font-semibold text-foreground tracking-tight">vonish Agent</span>
       </div>
 
-      {/* Right section */}
+      {/* Right section — only settings gear */}
       <div className="flex items-center gap-1">
         <Tooltip content="设置">
           <button
@@ -79,18 +79,6 @@ export function TopBar({ className }: TopBarProps) {
             <Settings className="w-4 h-4" />
           </button>
         </Tooltip>
-        <div className="w-px h-4 bg-border mx-1 hidden sm:block" />
-        <div className="hidden sm:flex items-center gap-0.5">
-          <button className="p-1.5 rounded-md hover:bg-surface-hover text-foreground-muted hover:text-foreground transition-colors">
-            <Minus className="w-3.5 h-3.5" />
-          </button>
-          <button className="p-1.5 rounded-md hover:bg-surface-hover text-foreground-muted hover:text-foreground transition-colors">
-            <Square className="w-3 h-3" />
-          </button>
-          <button className="p-1.5 rounded-md hover:bg-error/20 text-foreground-muted hover:text-error transition-colors">
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
       </div>
     </header>
   );
