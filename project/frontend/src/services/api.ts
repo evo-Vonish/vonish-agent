@@ -26,6 +26,8 @@ export interface StreamEvent {
   data: Record<string, unknown>;
 }
 
+const STREAM_IDLE_TIMEOUT_MS = 45_000;
+
 export interface ApiConfig {
   id: string;
   provider: 'deepseek' | 'kimi';
@@ -144,6 +146,38 @@ export async function deleteConversation(id: string): Promise<void> {
   }
 }
 
+export async function summarizeConversationTitle(
+  conversationId: string,
+  model: string,
+): Promise<string> {
+  const response = await fetch(`/api/conversations/${conversationId}/summarize-title`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model }),
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to summarize conversation title: HTTP ${response.status}`);
+  }
+  const body = (await response.json()) as { title: string };
+  return body.title;
+}
+
+export async function summarizeThinking(
+  content: string,
+  model: string,
+): Promise<string> {
+  const response = await fetch('/api/chat/thinking-summary', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content, model }),
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to summarize thinking: HTTP ${response.status}`);
+  }
+  const body = (await response.json()) as { summary: string };
+  return body.summary;
+}
+
 interface BackendMessage {
   role: string;
   content: string;
@@ -226,7 +260,12 @@ export async function streamChat(
   });
 
   if (!response.ok) {
-    throw new Error(`Chat stream failed: HTTP ${response.status}`);
+    const detail = await response.text().catch(() => '');
+    throw new Error(
+      detail
+        ? `Chat stream failed: HTTP ${response.status}: ${detail.slice(0, 1000)}`
+        : `Chat stream failed: HTTP ${response.status}`,
+    );
   }
   if (!response.body) {
     throw new Error('Chat stream did not return a response body.');
@@ -236,8 +275,25 @@ export async function streamChat(
   const decoder = new TextDecoder();
   let buffer = '';
 
+  const readWithTimeout = async () => {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        reader.read(),
+        new Promise<ReadableStreamReadResult<Uint8Array>>((_, reject) => {
+          timeoutId = setTimeout(() => {
+            void reader.cancel().catch(() => {});
+            reject(new Error('Chat stream stalled: no data received for 45 seconds.'));
+          }, STREAM_IDLE_TIMEOUT_MS);
+        }),
+      ]);
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+  };
+
   while (true) {
-    const { value, done } = await reader.read();
+    const { value, done } = await readWithTimeout();
     if (done) break;
 
     buffer += decoder.decode(value, { stream: true });
@@ -246,10 +302,17 @@ export async function streamChat(
 
     for (const chunk of chunks) {
       const parsed = parseSseChunk(chunk);
-      if (parsed) onEvent(parsed);
+      if (parsed) {
+        onEvent(parsed);
+        if (parsed.event === 'error' || parsed.event === 'aborted') {
+          await reader.cancel().catch(() => {});
+          return;
+        }
+      }
     }
   }
 
+  buffer += decoder.decode();
   if (buffer.trim()) {
     const parsed = parseSseChunk(buffer);
     if (parsed) onEvent(parsed);
@@ -342,6 +405,34 @@ export async function setDefaultApiConfig(id: string): Promise<ApiConfig> {
     throw new Error(`Failed to set default API config: HTTP ${response.status}`);
   }
   return toApiConfig((await response.json()) as BackendApiConfig);
+}
+
+// ── Tool Configuration API ────────────────────────────────────────────
+
+export async function fetchToolConfigs(): Promise<{ tools: Record<string, boolean> }> {
+  const response = await fetch('/api/tools/config');
+  if (!response.ok) throw new Error(`Failed to load tool configs: HTTP ${response.status}`);
+  return (await response.json()) as { tools: Record<string, boolean> };
+}
+
+export async function enableTool(name: string): Promise<void> {
+  const response = await fetch(`/api/tools/${encodeURIComponent(name)}/enable`, { method: 'POST' });
+  if (!response.ok) throw new Error(`Failed to enable tool: HTTP ${response.status}`);
+}
+
+export async function disableTool(name: string): Promise<void> {
+  const response = await fetch(`/api/tools/${encodeURIComponent(name)}/disable`, { method: 'POST' });
+  if (!response.ok) throw new Error(`Failed to disable tool: HTTP ${response.status}`);
+}
+
+export async function fetchPromptPreview(): Promise<{
+  token_estimate: number; hash: string; enabled_tools: string[];
+  blocks: { id: string; type: string; tokens: number; enabled: boolean; source: string }[];
+  content: string;
+}> {
+  const response = await fetch('/api/prompt/preview');
+  if (!response.ok) throw new Error(`Failed to load prompt preview: HTTP ${response.status}`);
+  return (await response.json()) as any;
 }
 
 function parseSseChunk(chunk: string): StreamEvent | null {

@@ -2,8 +2,6 @@ import { useEffect } from 'react';
 import { MainLayout } from '@/components/layout';
 import { MessageStream } from '@/components/chat';
 import { Composer } from '@/components/composer';
-import ToolsPage from '@/pages/ToolsPage';
-import { useHashRouter } from '@/hooks/useHashRouter';
 import { useChatStore } from '@/stores/chatStore';
 
 function ChatPage() {
@@ -16,18 +14,13 @@ function ChatPage() {
 }
 
 function App() {
-  const { currentPath } = useHashRouter();
   const initialize = useChatStore((state) => state.initialize);
 
   useEffect(() => {
     void initialize();
   }, [initialize]);
 
-  return (
-    <>
-      {currentPath === '/tools' ? <ToolsPage /> : <ChatPage />}
-    </>
-  );
+  return <ChatPage />;
 }
 
 export default App;

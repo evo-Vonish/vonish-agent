@@ -3,17 +3,36 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+
+
+def _resolve_sqlite_url(url: str) -> str:
+    """Resolve relative SQLite database URLs against the backend directory."""
+    prefixes = ("sqlite+aiosqlite:///", "sqlite:///")
+    for prefix in prefixes:
+        if not url.startswith(prefix):
+            continue
+        db_path = url[len(prefix):]
+        if not db_path or db_path == ":memory:":
+            return url
+        path = Path(db_path)
+        if path.is_absolute():
+            return url
+        return f"{prefix}{(BACKEND_DIR / path).resolve().as_posix()}"
+    return url
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(BACKEND_DIR / ".env"),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -78,7 +97,9 @@ class Settings(BaseSettings):
     @property
     def async_database_url(self) -> str:
         """Ensure async driver is used."""
-        url = self.database_url
+        url = _resolve_sqlite_url(self.database_url)
+        if url.startswith("sqlite:///"):
+            url = url.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
         if url.startswith("postgresql://") and "asyncpg" not in url:
             url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
         return url
@@ -86,7 +107,9 @@ class Settings(BaseSettings):
     @property
     def sync_database_url(self) -> str:
         """Get sync database URL for Alembic."""
-        url = self.database_url
+        url = _resolve_sqlite_url(self.database_url)
+        if url.startswith("sqlite+aiosqlite:///"):
+            url = url.replace("sqlite+aiosqlite:///", "sqlite:///", 1)
         if "asyncpg" in url:
             url = url.replace("postgresql+asyncpg://", "postgresql://", 1)
         return url

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import html
+import json
 import re
 import sys
 import time
@@ -70,7 +71,9 @@ class ToolExecutor:
     def __init__(self) -> None:
         self._handlers: dict[str, Callable[..., Awaitable[Any]]] = {}
         self._running: dict[str, asyncio.Task] = {}
-        self._default_timeout: float = 60.0
+        self._default_timeout: float = 120.0
+        self._ipython_manager: Any | None = None
+        self._ipython_tool: Any | None = None
 
     def register_handler(
         self, tool_name: str, handler: Callable[..., Awaitable[Any]]
@@ -113,6 +116,19 @@ class ToolExecutor:
 
             # Try to find a default handler
             handler = self._get_default_handler(request.tool_name)
+
+            # Tool gating: refuse execution if tool is disabled
+            from api.prompt import get_enabled_tools
+            if request.tool_name not in get_enabled_tools():
+                return ToolCallResult(
+                    tool_name=request.tool_name,
+                    call_id=call_id,
+                    success=False,
+                    result=None,
+                    execution_time_ms=0.0,
+                    error_message=f"Tool '{request.tool_name}' is disabled. Enable it in the Tool Management panel.",
+                )
+
             if handler is None:
                 if tool_def is None:
                     return ToolCallResult(
@@ -167,13 +183,24 @@ class ToolExecutor:
             )
 
             execution_time = (time.monotonic() - start_time) * 1000
+            result_success = not (
+                isinstance(result, dict) and result.get("success") is False
+            )
+            result_error = (
+                str(result.get("error") or result.get("error_message"))
+                if isinstance(result, dict)
+                and result.get("success") is False
+                and (result.get("error") or result.get("error_message"))
+                else None
+            )
 
             return ToolCallResult(
                 tool_name=request.tool_name,
                 call_id=call_id,
-                success=True,
+                success=result_success,
                 result=result,
                 execution_time_ms=execution_time,
+                error_message=result_error,
                 metadata={"arguments": request.arguments},
             )
 
@@ -375,29 +402,42 @@ class ToolExecutor:
     async def _handle_ipython(
         self,
         code: str,
+        session_mode: str = "continue",
+        session_id: str | None = None,
+        timeout_seconds: int = 30,
+        restart: bool = False,
         conversation_id: str = "",
         **_: Any,
     ) -> dict[str, Any]:
-        workspace = self._workspace_dir(conversation_id)
-        process = await asyncio.create_subprocess_exec(
-            sys.executable,
-            "-c",
-            code,
-            cwd=str(workspace),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        from tools.ipython_runtime.ipython_tool import IPythonTool
+        from tools.ipython_runtime.python_kernel_manager import PythonKernelManager
+        from tools.ipython_runtime.python_sandbox import SandboxPolicy
+
+        workspace_root = Path(settings.workspace_root).resolve()
+        workspace_root.mkdir(parents=True, exist_ok=True)
+
+        if self._ipython_tool is None:
+            self._ipython_manager = PythonKernelManager(
+                workspaces_root=workspace_root,
+                sandbox_policy=SandboxPolicy(workspace_root=workspace_root),
+                idle_timeout_seconds=3600.0,
+            )
+            await self._ipython_manager.start()
+            self._ipython_tool = IPythonTool(kernel_manager=self._ipython_manager)
+
+        mode = "reset" if restart else session_mode
+        timeout = max(1, min(int(timeout_seconds), int(self._default_timeout) - 5))
+        result = await self._ipython_tool.execute(
+            conversation_id=conversation_id or "default",
+            code=code,
+            session_mode=mode,
+            session_id=session_id,
+            timeout_seconds=timeout,
         )
-        stdout, stderr = await asyncio.wait_for(
-            process.communicate(),
-            timeout=self._default_timeout,
-        )
-        return {
-            "success": process.returncode == 0,
-            "exit_code": process.returncode,
-            "stdout": stdout.decode("utf-8", errors="replace")[:20000],
-            "stderr": stderr.decode("utf-8", errors="replace")[:20000],
-            "cwd": str(workspace),
-        }
+        payload = result.to_tool_response()
+        payload["cwd"] = str(self._workspace_dir(conversation_id))
+        payload["session_mode"] = mode
+        return payload
 
     async def _handle_web_fetch(
         self,
@@ -512,37 +552,60 @@ class ToolExecutor:
         self,
         query: str,
         num_results: int = 5,
+        max_time_ms: int = 15000,
+        max_content_length: int = 8000,
+        per_url_timeout_ms: int = 3000,
+        max_per_url: int = 5000,
         **_: Any,
     ) -> dict[str, Any]:
-        import httpx
+        runner = (
+            Path(__file__).resolve().parents[1]
+            / "tool_runtimes"
+            / "web_search"
+            / "runner.mjs"
+        )
+        if not runner.exists():
+            return {
+                "success": False,
+                "query": query,
+                "error": f"web_search runner not found at {runner}",
+            }
 
         max_results = max(1, min(int(num_results), 10))
-        search_url = f"https://duckduckgo.com/html/?q={quote_plus(query)}"
-        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True, trust_env=False) as client:
-            response = await client.get(
-                search_url,
-                headers={"User-Agent": "Mozilla/5.0"},
-            )
-        response.raise_for_status()
+        payload = {
+            "query": query,
+            "maxTime": max(3000, min(int(max_time_ms), 45000)),
+            "maxContentLength": max(500, min(int(max_content_length), 50000)),
+            "perUrlTimeout": max(500, min(int(per_url_timeout_ms), 15000)),
+            "maxPerUrl": max(500, min(int(max_per_url), 30000)),
+        }
+        process = await asyncio.create_subprocess_exec(
+            "node",
+            str(runner),
+            json.dumps(payload, ensure_ascii=False),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(
+            process.communicate(),
+            timeout=payload["maxTime"] / 1000 + 15,
+        )
 
-        results: list[dict[str, str]] = []
-        for match in re.finditer(
-            r'<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>(.*?)</a>',
-            response.text,
-            re.IGNORECASE | re.DOTALL,
-        ):
-            href = html.unescape(match.group(1))
-            title = re.sub(r"<[^>]+>", "", match.group(2))
-            title = html.unescape(re.sub(r"\s+", " ", title)).strip()
-            results.append({"title": title, "url": urljoin(str(response.url), href)})
-            if len(results) >= max_results:
-                break
+        if process.returncode != 0:
+            return {
+                "success": False,
+                "query": query,
+                "error": stderr.decode("utf-8", errors="replace")[:4000],
+            }
 
+        data = json.loads(stdout.decode("utf-8", errors="replace"))
+        results = data.get("results", [])[:max_results]
         return {
             "success": True,
             "query": query,
             "results": results,
-            "source": "duckduckgo_html",
+            "stats": data.get("stats", {}),
+            "source": "web-search_pipeline",
         }
 
 

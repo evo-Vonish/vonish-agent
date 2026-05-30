@@ -45,12 +45,22 @@ function LayoutIcon({ className }: { className?: string }) {
 
 interface ToolCategorySectionProps {
   category: ToolCategoryType;
+  searchQuery?: string;
 }
 
-export function ToolCategorySection({ category }: ToolCategorySectionProps) {
+export function ToolCategorySection({ category, searchQuery = '' }: ToolCategorySectionProps) {
   const [collapsed, setCollapsed] = useState(false);
+  const normalizedQuery = searchQuery.trim().toLowerCase();
   const tools = useToolStore(
-    useShallow((s) => s.tools.filter((t) => t.category === category)),
+    useShallow((s) =>
+      s.tools.filter(
+        (t) =>
+          t.category === category &&
+          (!normalizedQuery ||
+            t.name.toLowerCase().includes(normalizedQuery) ||
+            t.description.toLowerCase().includes(normalizedQuery)),
+      ),
+    ),
   );
   const enableCategory = useToolStore((s) => s.enableCategory);
   const disableCategory = useToolStore((s) => s.disableCategory);

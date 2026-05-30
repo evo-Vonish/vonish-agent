@@ -186,6 +186,9 @@ class AgentLoop:
 
                     elif chunk_type == "done":
                         if content and isinstance(content, dict) and content.get("error"):
+                            if in_thinking:
+                                in_thinking = False
+                                yield sse_event("thinking_end", {})
                             yield sse_event("error", {"detail": content["error"]})
                             return
                         # Check for native tool_calls assembled by the adapter
@@ -295,16 +298,33 @@ class AgentLoop:
         resources: list[ResourceRef] | None,
         system_prompt: str | None,
     ) -> "AgentContext":
-        """Build the agent context for the conversation.
+        """Build agent context using PromptBuilder for tool-aware prompts.
 
-        Tools are passed natively to the model (not injected into the prompt).
-        System prompt is clean — no text-based tool formatting.
+        Only enabled tools get prompt blocks AND API schemas.
+        Disabled tools are invisible to the model.
         """
         from agent.tool_registry import ToolRegistry
+        from api.prompt import get_enabled_tools
+        from prompt.prompt_builder import PromptBuilder
 
+        # Determine which tools are enabled
+        enabled_names = get_enabled_tools() if system_prompt is None else []
+        # Allow explicit system_prompt override to bypass PromptBuilder
+        if system_prompt:
+            prompt = system_prompt
+            enabled_names = list(ToolRegistry().list_all())
+        else:
+            builder = PromptBuilder()
+            built = builder.build(enabled_tools=enabled_names, model_id=model_id)
+            prompt = built.content
+
+        # Only pass enabled tool schemas to the model
         registry = ToolRegistry()
-        tools = registry.list_for_json_schema()
-        prompt = system_prompt or self._default_system_prompt()
+        all_schemas = registry.list_for_json_schema()
+        enabled_schemas = [
+            t for t in all_schemas
+            if t["function"]["name"] in enabled_names
+        ]
 
         history_messages = await self._get_conversation_history(conversation_id)
         current_message = MessageBlock(role="user", content=user_input)
@@ -319,7 +339,7 @@ class AgentLoop:
                     description=t["function"]["description"],
                     parameters=t["function"]["parameters"],
                 )
-                for t in tools
+                for t in enabled_schemas
             ],
             conversation_id=conversation_id,
         )

@@ -11,10 +11,8 @@ import {
   ChevronLeft,
   ChevronRight as ChevronRightIcon,
   X,
-  Wrench,
   Loader2,
 } from 'lucide-react';
-import { useHashRouter } from '@/hooks/useHashRouter';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
 import { useChatStore } from '@/stores/chatStore';
@@ -86,8 +84,6 @@ export function Sidebar({ className }: SidebarProps) {
   const { conversations, currentConversationId, selectConversation, deleteConversation, createConversation } =
     useChatStore();
   const { fileTree, loading: wsLoading, loaded: wsLoaded } = useWorkspaceStore();
-  const { currentPath, navigate } = useHashRouter();
-  const isToolsPage = currentPath === '/tools';
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'chats' | 'files'>('chats');
   const [deleteMenuOpen, setDeleteMenuOpen] = useState<string | null>(null);
@@ -171,42 +167,8 @@ export function Sidebar({ className }: SidebarProps) {
                   <X className="w-4 h-4" />
                 </button>
               </div>
-              {/* Navigation buttons */}
-              <div className="p-2 space-y-1.5">
-                <button
-                  onClick={() => {
-                    navigate('/');
-                    setMobileSidebarOpen(false);
-                  }}
-                  className={cn(
-                    'w-full flex items-center gap-2 px-3 py-2 rounded-md text-xs font-medium transition-colors',
-                    !isToolsPage
-                      ? 'bg-primary/10 text-primary'
-                      : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground'
-                  )}
-                >
-                  <MessageSquare className="w-3.5 h-3.5" />
-                  对话
-                </button>
-                <button
-                  onClick={() => {
-                    navigate('/tools');
-                    setMobileSidebarOpen(false);
-                  }}
-                  className={cn(
-                    'w-full flex items-center gap-2 px-3 py-2 rounded-md text-xs font-medium transition-colors',
-                    isToolsPage
-                      ? 'bg-primary/10 text-primary'
-                      : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground'
-                  )}
-                >
-                  <Wrench className="w-3.5 h-3.5" />
-                  工具管理
-                </button>
-              </div>
-              <div className="border-b border-border mx-2" />
               {/* Search */}
-              <div className="px-2 pb-2">
+              <div className="px-2 py-2">
                 <div className="relative">
                   <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-foreground-subtle" />
                   <input
@@ -275,26 +237,10 @@ export function Sidebar({ className }: SidebarProps) {
           <div className="w-5 h-px bg-border" />
           <Tooltip content="新对话">
             <button
-              onClick={() => {
-                navigate('/');
-                createConversation();
-              }}
+              onClick={() => createConversation()}
               className="p-1.5 rounded-md hover:bg-surface-hover text-foreground-muted hover:text-foreground transition-colors"
             >
               <MessageSquare className="w-4 h-4" />
-            </button>
-          </Tooltip>
-          <Tooltip content="工具管理">
-            <button
-              onClick={() => navigate('/tools')}
-              className={cn(
-                'p-1.5 rounded-md transition-colors',
-                isToolsPage
-                  ? 'bg-primary/10 text-primary'
-                  : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground'
-              )}
-            >
-              <Wrench className="w-4 h-4" />
             </button>
           </Tooltip>
         </div>
@@ -360,34 +306,6 @@ export function Sidebar({ className }: SidebarProps) {
             <ChevronLeft className="w-3.5 h-3.5" />
           </button>
         </Tooltip>
-      </div>
-
-      {/* Navigation */}
-      <div className="flex gap-1 px-2 pb-2">
-        <button
-          onClick={() => navigate('/')}
-          className={cn(
-            'flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs font-medium rounded-md transition-colors',
-            !isToolsPage
-              ? 'bg-primary/10 text-primary'
-              : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground'
-          )}
-        >
-          <MessageSquare className="w-3.5 h-3.5" />
-          对话
-        </button>
-        <button
-          onClick={() => navigate('/tools')}
-          className={cn(
-            'flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs font-medium rounded-md transition-colors',
-            isToolsPage
-              ? 'bg-primary/10 text-primary'
-              : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground'
-          )}
-        >
-          <Wrench className="w-3.5 h-3.5" />
-          工具
-        </button>
       </div>
 
       {/* Tabs */}

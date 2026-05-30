@@ -1,0 +1,100 @@
+"""Prompt Preview API — inspect what the agent actually sends to the model."""
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from core.auth import User, get_current_user
+from core.logging import get_logger
+from db.session import get_db
+from prompt.prompt_builder import PromptBuilder
+
+logger = get_logger(__name__)
+router = APIRouter(prefix="/api")
+
+
+# ── In-memory tool config (migrate to DB later) ──────────────────────────
+_tool_configs: dict[str, bool] = {
+    "read_file": True,
+    "edit_file": True,
+    "shell_command": True,
+    "ipython": True,
+    "web_fetch": True,
+    "web_search": True,
+}
+
+
+def get_enabled_tools() -> list[str]:
+    """Return list of currently enabled tool names."""
+    return [name for name, enabled in _tool_configs.items() if enabled]
+
+
+def set_tool_enabled(tool_name: str, enabled: bool) -> None:
+    """Enable or disable a tool by name."""
+    if tool_name in _tool_configs:
+        _tool_configs[tool_name] = enabled
+        logger.info(f"Tool {tool_name} -> {'enabled' if enabled else 'disabled'}")
+
+
+def get_all_tool_configs() -> dict[str, bool]:
+    """Return all tool configs."""
+    return dict(_tool_configs)
+
+
+@router.get("/tools/config")
+async def list_tool_configs(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """List all tool configs with enabled state."""
+    return {"tools": get_all_tool_configs()}
+
+
+@router.post("/tools/{tool_name}/enable")
+async def enable_tool(
+    tool_name: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Enable a tool."""
+    set_tool_enabled(tool_name, True)
+    return {"tool": tool_name, "enabled": True}
+
+
+@router.post("/tools/{tool_name}/disable")
+async def disable_tool(
+    tool_name: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Disable a tool."""
+    set_tool_enabled(tool_name, False)
+    return {"tool": tool_name, "enabled": False}
+
+
+@router.get("/prompt/preview")
+async def prompt_preview(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Preview the assembled system prompt with per-block token estimates."""
+    builder = PromptBuilder()
+    enabled = get_enabled_tools()
+    built = builder.preview(enabled_tools=enabled)
+
+    return {
+        "token_estimate": built.token_estimate,
+        "hash": built.hash,
+        "enabled_tools": built.enabled_tools,
+        "blocks": [
+            {
+                "id": b.id,
+                "type": b.type,
+                "tokens": len(b.content) // 4,
+                "enabled": b.enabled,
+                "source": b.source,
+            }
+            for b in built.blocks
+        ],
+        "content": built.content,
+    }

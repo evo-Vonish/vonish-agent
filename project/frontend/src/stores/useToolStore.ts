@@ -1,9 +1,11 @@
 import { create } from 'zustand';
 import type { ToolDefinition, ToolCategoryType } from '@/types/tools';
+import { fetchToolConfigs, enableTool, disableTool } from '@/services/api';
 
 interface ToolState {
   tools: ToolDefinition[];
   toggleTool: (name: string) => void;
+  syncFromBackend: () => Promise<void>;
   enableCategory: (category: ToolCategoryType) => void;
   disableCategory: (category: ToolCategoryType) => void;
   getEnabledTools: () => ToolDefinition[];
@@ -184,9 +186,9 @@ const mockTools: ToolDefinition[] = [
     name: 'web_search',
     description: 'Search the web for information',
     category: 'web_search',
-    capabilities: ['read_only', 'requires_approval'],
+    capabilities: ['read_only'],
     approvalLevel: 'auto',
-    isEnabled: false,
+    isEnabled: true,
     isReadOnly: true,
     supportsParallel: true,
     schema: {
@@ -194,6 +196,10 @@ const mockTools: ToolDefinition[] = [
       properties: {
         query: { type: 'string', description: 'Search query' },
         num_results: { type: 'number', description: 'Number of results to return' },
+        max_time_ms: { type: 'number', description: 'Overall search and crawl budget in ms' },
+        max_content_length: { type: 'number', description: 'Maximum returned text length' },
+        per_url_timeout_ms: { type: 'number', description: 'Per-page crawl timeout in ms' },
+        max_per_url: { type: 'number', description: 'Maximum extracted text per page' },
       },
       required: ['query'],
     },
@@ -244,17 +250,20 @@ const mockTools: ToolDefinition[] = [
   },
   {
     name: 'ipython',
-    description: 'Execute Python code in IPython environment',
-    category: 'system',
+    description: 'Execute Python code in a persistent IPython kernel',
+    category: 'python_ops',
     capabilities: ['writes_files', 'requires_approval'],
     approvalLevel: 'required',
-    isEnabled: false,
+    isEnabled: true,
     isReadOnly: false,
     supportsParallel: false,
     schema: {
       type: 'object',
       properties: {
         code: { type: 'string', description: 'Python code to execute' },
+        session_mode: { type: 'string', enum: ['continue', 'new', 'reset', 'ephemeral'], description: 'Kernel session mode' },
+        session_id: { type: 'string', description: 'Optional named session id' },
+        timeout_seconds: { type: 'number', description: 'Execution timeout in seconds' },
         restart: { type: 'boolean', description: 'Restart the IPython environment' },
       },
       required: ['code'],
@@ -267,12 +276,43 @@ const mockTools: ToolDefinition[] = [
 export const useToolStore = create<ToolState>((set, get) => ({
   tools: mockTools,
 
-  toggleTool: (name) =>
+  toggleTool: async (name) => {
+    const current = get().tools.find((t) => t.name === name);
+    if (!current) return;
+    const newState = !current.isEnabled;
+    // Optimistic UI update
     set((state) => ({
       tools: state.tools.map((t) =>
-        t.name === name ? { ...t, isEnabled: !t.isEnabled } : t
+        t.name === name ? { ...t, isEnabled: newState } : t
       ),
-    })),
+    }));
+    // Sync to backend
+    try {
+      if (newState) await enableTool(name);
+      else await disableTool(name);
+    } catch {
+      // Revert on failure
+      set((state) => ({
+        tools: state.tools.map((t) =>
+          t.name === name ? { ...t, isEnabled: !newState } : t
+        ),
+      }));
+    }
+  },
+
+  syncFromBackend: async () => {
+    try {
+      const { tools: configs } = await fetchToolConfigs();
+      set((state) => ({
+        tools: state.tools.map((t) => ({
+          ...t,
+          isEnabled: configs[t.name] ?? t.isEnabled,
+        })),
+      }));
+    } catch {
+      // Keep current state if backend unavailable
+    }
+  },
 
   enableCategory: (category) =>
     set((state) => ({

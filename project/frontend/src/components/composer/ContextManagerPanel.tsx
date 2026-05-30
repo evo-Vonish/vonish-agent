@@ -7,15 +7,21 @@ import {
   Pencil,
   Plus,
   Save,
+  Search,
   Server,
   Trash2,
+  Wrench,
   X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useChatStore } from '@/stores/chatStore';
+import { useToolStore } from '@/stores/useToolStore';
 import { useUIStore } from '@/stores/uiStore';
 import { Progress } from '@/components/ui/Progress';
+import { AddToolModal } from '@/components/tools/AddToolModal';
+import { ToolCategorySection } from '@/components/tools/ToolCategorySection';
 import type { ContextProfile } from '@/types';
+import type { ToolCategoryType } from '@/types/tools';
 import {
   type ApiConfig,
   createApiConfig,
@@ -30,7 +36,9 @@ interface ContextManagerPanelProps {
 }
 
 type Provider = 'deepseek' | 'kimi';
-type Tab = 'api' | 'context';
+type Tab = 'api' | 'tools' | 'context';
+
+const toolCategoryOrder: ToolCategoryType[] = ['file_ops', 'workspace', 'web_search', 'system'];
 
 const providerLabels: Record<Provider, string> = {
   deepseek: 'DeepSeek',
@@ -97,6 +105,7 @@ function TokenGauge({ used, budget }: { used: number; budget: number }) {
 
 export function ContextManagerPanel({ className }: ContextManagerPanelProps) {
   const { contextProfile, setContextProfile } = useChatStore();
+  const tools = useToolStore((s) => s.tools);
   const { toggleRightPanel } = useUIStore();
   const [activeTab, setActiveTab] = useState<Tab>('api');
   const [configs, setConfigs] = useState<ApiConfig[]>([]);
@@ -104,8 +113,24 @@ export function ContextManagerPanel({ className }: ContextManagerPanelProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [form, setForm] = useState(emptyForm);
+  const [toolSearchQuery, setToolSearchQuery] = useState('');
+  const [showAddToolModal, setShowAddToolModal] = useState(false);
 
   const editing = Boolean(form.id);
+  const enabledToolCount = tools.filter((tool) => tool.isEnabled).length;
+  const visibleToolCategories = useMemo(
+    () =>
+      toolCategoryOrder.filter((category) =>
+        tools.some(
+          (tool) =>
+            tool.category === category &&
+            (!toolSearchQuery.trim() ||
+              tool.name.toLowerCase().includes(toolSearchQuery.trim().toLowerCase()) ||
+              tool.description.toLowerCase().includes(toolSearchQuery.trim().toLowerCase())),
+        ),
+      ),
+    [toolSearchQuery, tools],
+  );
   const grouped = useMemo(
     () => ({
       deepseek: configs.filter((config) => config.provider === 'deepseek'),
@@ -254,6 +279,17 @@ export function ContextManagerPanel({ className }: ContextManagerPanelProps) {
           API 配置
         </button>
         <button
+          onClick={() => setActiveTab('tools')}
+          className={cn(
+            'flex-1 px-2 py-2 text-xs font-medium border-b-2 transition-colors',
+            activeTab === 'tools'
+              ? 'border-primary text-foreground'
+              : 'border-transparent text-foreground-muted hover:text-foreground',
+          )}
+        >
+          工具
+        </button>
+        <button
           onClick={() => setActiveTab('context')}
           className={cn(
             'flex-1 px-2 py-2 text-xs font-medium border-b-2 transition-colors',
@@ -266,7 +302,7 @@ export function ContextManagerPanel({ className }: ContextManagerPanelProps) {
         </button>
       </div>
 
-      {activeTab === 'api' ? (
+      {activeTab === 'api' && (
         <div className="flex-1 overflow-y-auto p-3 space-y-4">
           <div className="space-y-2">
             <div className="grid grid-cols-2 gap-1 rounded-lg bg-background border border-border p-1">
@@ -434,7 +470,82 @@ export function ContextManagerPanel({ className }: ContextManagerPanelProps) {
             ))}
           </div>
         </div>
-      ) : (
+      )}
+
+      {activeTab === 'tools' && (
+        <div className="flex-1 overflow-y-auto p-3 space-y-4">
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+                <Wrench className="w-3.5 h-3.5 text-primary" />
+                工具管理
+              </div>
+              <div className="mt-0.5 text-[10px] text-foreground-subtle">
+                {enabledToolCount} / {tools.length} 已启用
+              </div>
+            </div>
+            <button
+              onClick={() => setShowAddToolModal(true)}
+              className="inline-flex items-center justify-center gap-1.5 rounded-md bg-primary px-2.5 py-1.5 text-xs font-medium text-white hover:bg-primary-hover"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              新增
+            </button>
+          </div>
+
+          <div className="relative">
+            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-foreground-subtle" />
+            <input
+              type="text"
+              value={toolSearchQuery}
+              onChange={(event) => setToolSearchQuery(event.target.value)}
+              placeholder="搜索工具..."
+              className="w-full rounded-md bg-background border border-border pl-7 pr-2.5 py-1.5 text-xs text-foreground placeholder:text-foreground-subtle outline-none focus:border-primary/60"
+            />
+          </div>
+
+          <div className="grid grid-cols-3 gap-1.5">
+            <div className="rounded-md border border-border bg-background px-2 py-1.5">
+              <div className="text-[10px] text-foreground-subtle">Auto</div>
+              <div className="text-xs font-semibold text-foreground">
+                {tools.filter((tool) => tool.approvalLevel === 'auto').length}
+              </div>
+            </div>
+            <div className="rounded-md border border-border bg-background px-2 py-1.5">
+              <div className="text-[10px] text-foreground-subtle">Suggest</div>
+              <div className="text-xs font-semibold text-foreground">
+                {tools.filter((tool) => tool.approvalLevel === 'suggest').length}
+              </div>
+            </div>
+            <div className="rounded-md border border-border bg-background px-2 py-1.5">
+              <div className="text-[10px] text-foreground-subtle">Required</div>
+              <div className="text-xs font-semibold text-foreground">
+                {tools.filter((tool) => tool.approvalLevel === 'required').length}
+              </div>
+            </div>
+          </div>
+
+          {visibleToolCategories.length === 0 ? (
+            <div className="rounded-md border border-border bg-background px-3 py-6 text-center text-xs text-foreground-subtle">
+              没有匹配的工具
+            </div>
+          ) : (
+            <div className="space-y-5">
+              {visibleToolCategories.map((category) => (
+                <ToolCategorySection
+                  key={category}
+                  category={category}
+                  searchQuery={toolSearchQuery}
+                />
+              ))}
+            </div>
+          )}
+
+          <AddToolModal open={showAddToolModal} onClose={() => setShowAddToolModal(false)} />
+        </div>
+      )}
+
+      {activeTab === 'context' && (
         <div className="flex-1 overflow-y-auto p-3 space-y-4">
           <div className="flex items-center gap-2 text-xs text-foreground-muted">
             <Gauge className="w-4 h-4 text-primary" />

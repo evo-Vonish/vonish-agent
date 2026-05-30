@@ -10,10 +10,16 @@ import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
 # Add project root to path for imports
 project_root = Path(__file__).parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
+
+# Frontend dist path (sibling to backend/)
+FRONTEND_DIST = project_root.parent / "frontend" / "dist"
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -115,6 +121,10 @@ def create_app() -> FastAPI:
     # Register exception handlers
     register_exception_handlers(app)
 
+    @app.get("/health")
+    async def health_check() -> dict[str, str]:
+        return {"status": "healthy", "version": "1.0.0", "service": "agent-backend-v2"}
+
     # Register routers
     _register_routers(app)
 
@@ -133,6 +143,7 @@ def _register_routers(app: FastAPI) -> None:
     from api.memory import router as memory_router
     from api.models import router as models_router
     from api.api_configs import router as api_configs_router
+    from api.prompt import router as prompt_router
 
     app.include_router(chat_router)
     app.include_router(conversations_router)
@@ -143,6 +154,24 @@ def _register_routers(app: FastAPI) -> None:
     app.include_router(memory_router)
     app.include_router(models_router)
     app.include_router(api_configs_router)
+    app.include_router(prompt_router)
+
+    # ── Serve frontend static files ──────────────────────────
+    if FRONTEND_DIST.is_dir() and (FRONTEND_DIST / "index.html").exists():
+        # API routes take precedence — mount static after them
+        app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
+
+        @app.get("/{full_path:path}", include_in_schema=False)
+        async def spa_fallback(full_path: str):
+            """Serve index.html for any non-API route (SPA fallback)."""
+            fp = FRONTEND_DIST / full_path
+            if fp.is_file():
+                return FileResponse(fp)
+            return FileResponse(FRONTEND_DIST / "index.html")
+
+        logger.info(f"Frontend static files mounted from {FRONTEND_DIST}")
+    else:
+        logger.warning(f"Frontend dist not found at {FRONTEND_DIST}")
 
     logger.info("All API routers registered.")
 
@@ -152,34 +181,6 @@ def _register_routers(app: FastAPI) -> None:
 # ---------------------------------------------------------------------------
 
 app = create_app()
-
-
-@app.get("/health")
-async def health_check() -> dict[str, str]:
-    """Health check endpoint.
-
-    Returns:
-        Status dictionary.
-    """
-    return {
-        "status": "healthy",
-        "version": "1.0.0",
-        "service": "agent-backend-v2",
-    }
-
-
-@app.get("/")
-async def root() -> dict[str, str]:
-    """Root endpoint.
-
-    Returns:
-        Welcome message.
-    """
-    return {
-        "message": "Agent Backend v2",
-        "docs": "/docs",
-        "health": "/health",
-    }
 
 
 # ---------------------------------------------------------------------------
