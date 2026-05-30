@@ -99,6 +99,8 @@ const zhCN: I18nDictionary = {
   "toolCategory.workspace": "工作区",
   "toolCategory.python_ops": "Python",
   "toolCategory.web_search": "网页搜索",
+  "toolCategory.web_ops": "网页操作",
+  "toolCategory.shell_ops": "终端",
   "toolCategory.system": "系统",
 
   "approval.auto": "自动",

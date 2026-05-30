@@ -7,7 +7,7 @@ import { ToolCategorySection } from '@/components/tools/ToolCategorySection';
 import { AddToolModal } from '@/components/tools/AddToolModal';
 import type { ToolCategoryType } from '@/types/tools';
 
-const CATEGORY_ORDER: ToolCategoryType[] = ['file_ops', 'workspace', 'python_ops', 'web_search', 'system'];
+const CATEGORY_ORDER: ToolCategoryType[] = ['file_ops', 'workspace', 'python_ops', 'web_ops', 'shell_ops', 'system'];
 
 export default function ToolsPage() {
   const [showAddModal, setShowAddModal] = useState(false);

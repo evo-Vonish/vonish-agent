@@ -97,6 +97,8 @@ const jaJP: I18nDictionary = {
   "toolCategory.workspace": "ワークスペース",
   "toolCategory.python_ops": "Python",
   "toolCategory.web_search": "Web検索",
+  "toolCategory.web_ops": "ウェブ",
+  "toolCategory.shell_ops": "シェル",
   "toolCategory.system": "システム",
 
   "approval.auto": "自動",

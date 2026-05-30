@@ -97,6 +97,8 @@ const enUS: I18nDictionary = {
   "toolCategory.workspace": "Workspace",
   "toolCategory.python_ops": "Python",
   "toolCategory.web_search": "Web Search",
+  "toolCategory.web_ops": "Web",
+  "toolCategory.shell_ops": "Shell",
   "toolCategory.system": "System",
 
   "approval.auto": "Auto",

@@ -97,6 +97,8 @@ const deDE: I18nDictionary = {
   "toolCategory.workspace": "Arbeitsbereich",
   "toolCategory.python_ops": "Python",
   "toolCategory.web_search": "Websuche",
+  "toolCategory.web_ops": "Web",
+  "toolCategory.shell_ops": "Shell",
   "toolCategory.system": "System",
 
   "approval.auto": "Auto",

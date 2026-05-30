@@ -97,6 +97,8 @@ const koKR: I18nDictionary = {
   "toolCategory.workspace": "작업공간",
   "toolCategory.python_ops": "Python",
   "toolCategory.web_search": "웹 검색",
+  "toolCategory.web_ops": "웹",
+  "toolCategory.shell_ops": "셸",
   "toolCategory.system": "시스템",
 
   "approval.auto": "자동",
