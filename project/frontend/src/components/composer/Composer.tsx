@@ -5,6 +5,7 @@ import { useChatStore } from '@/stores/chatStore';
 import { useI18n } from '@/i18n';
 import { ModelSelector } from './ModelSelector';
 import { ContextButton } from './ContextButton';
+import { TodoIndicator } from './TodoIndicator';
 
 interface ComposerProps {
   className?: string;
@@ -86,6 +87,7 @@ export function Composer({ className }: ComposerProps) {
         <div className="flex items-center gap-1 mb-2">
           <ModelSelector />
           <ContextButton />
+          <TodoIndicator />
           <button className="p-1.5 rounded-md hover:bg-surface-hover text-foreground-muted hover:text-foreground transition-colors">
             <Paperclip className="w-4 h-4" />
           </button>

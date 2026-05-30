@@ -116,6 +116,11 @@ const enUS: I18nDictionary = {
   "thinking.expand": "Expand",
   "thinking.streaming": "Thinking…",
 
+  "todo.title": "Tasks",
+  "todo.empty": "No tasks",
+  "todo.noItems": "No todo items yet",
+  "todo.disabledHint": "set_todo_list is disabled. Enable it in Tool Management.",
+
   "context.title": "Context",
   "context.rounds": "Rounds",
   "context.toolCalls": "Tool Calls",

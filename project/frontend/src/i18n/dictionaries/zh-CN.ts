@@ -118,6 +118,11 @@ const zhCN: I18nDictionary = {
   "thinking.expand": "展开",
   "thinking.streaming": "思考中…",
 
+  "todo.title": "任务",
+  "todo.empty": "无任务",
+  "todo.noItems": "暂无待办事项",
+  "todo.disabledHint": "set_todo_list 工具未启用，Agent 无法创建任务列表。请在工具管理中启用。",
+
   "context.title": "上下文",
   "context.rounds": "消息轮数",
   "context.toolCalls": "工具调用",

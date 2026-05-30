@@ -114,6 +114,11 @@ const deDE: I18nDictionary = {
   "thinking.expand": "Ausklappen",
   "thinking.streaming": "Denkt nach…",
 
+  "todo.title": "Aufgaben",
+  "todo.empty": "Keine",
+  "todo.noItems": "Keine Aufgaben",
+  "todo.disabledHint": "set_todo_list deaktiviert",
+
   "context.title": "Kontext",
   "context.rounds": "Runden",
   "context.toolCalls": "Tool-Aufrufe",

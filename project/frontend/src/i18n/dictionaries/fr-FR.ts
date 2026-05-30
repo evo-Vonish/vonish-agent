@@ -114,6 +114,11 @@ const frFR: I18nDictionary = {
   "thinking.expand": "Développer",
   "thinking.streaming": "Réflexion…",
 
+  "todo.title": "Tâches",
+  "todo.empty": "Vide",
+  "todo.noItems": "Aucune tâche",
+  "todo.disabledHint": "set_todo_list désactivé",
+
   "context.title": "Contexte",
   "context.rounds": "Tours",
   "context.toolCalls": "Appels outil",

@@ -114,6 +114,11 @@ const jaJP: I18nDictionary = {
   "thinking.expand": "開く",
   "thinking.streaming": "思考中…",
 
+  "todo.title": "タスク",
+  "todo.empty": "なし",
+  "todo.noItems": "予定なし",
+  "todo.disabledHint": "set_todo_listが無効です。ツール管理で有効にしてください。",
+
   "context.title": "コンテキスト",
   "context.rounds": "ラウンド",
   "context.toolCalls": "ツール呼出",

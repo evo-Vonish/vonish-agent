@@ -114,6 +114,11 @@ const koKR: I18nDictionary = {
   "thinking.expand": "펼치기",
   "thinking.streaming": "생각 중…",
 
+  "todo.title": "작업",
+  "todo.empty": "없음",
+  "todo.noItems": "할 일 없음",
+  "todo.disabledHint": "set_todo_list가 비활성화됨",
+
   "context.title": "컨텍스트",
   "context.rounds": "라운드",
   "context.toolCalls": "도구 호출",
