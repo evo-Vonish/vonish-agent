@@ -99,6 +99,7 @@ async def chat_stream(
 
     # Store user message to DB
     import json as _json
+    import time as _time
     import uuid as _uuid
     from db.models import Message as MessageModel
 
@@ -115,6 +116,10 @@ async def chat_stream(
     # Collect assistant response from SSE events
     assistant_parts: list[str] = []
     thinking_parts: list[str] = []
+    assistant_segments: list[dict[str, Any]] = []
+    tool_calls_by_id: dict[str, dict[str, Any]] = {}
+    active_thinking_segment: dict[str, Any] | None = None
+    active_text_segment: dict[str, Any] | None = None
 
     # Streaming XML tool-call filter state machine
     _xml_buf = ""       # buffered partial text for filtering
@@ -167,6 +172,109 @@ async def chat_stream(
         _xml_buf = ""
         return clean
 
+    def _parse_sse_event(event_str: str) -> tuple[str | None, dict[str, Any]]:
+        """Parse the single-event SSE payload emitted by the agent loop."""
+        event_name: str | None = None
+        data: dict[str, Any] = {}
+        for line in event_str.strip().split("\n"):
+            if line.startswith("event:"):
+                event_name = line[6:].strip()
+            elif line.startswith("data:"):
+                try:
+                    parsed = _json.loads(line[5:].strip())
+                    if isinstance(parsed, dict):
+                        data = parsed
+                except Exception:
+                    data = {}
+        return event_name, data
+
+    def _append_thinking_delta(delta: str) -> None:
+        nonlocal active_thinking_segment, active_text_segment
+        if not active_thinking_segment:
+            active_thinking_segment = {
+                "id": f"thinking-{len(assistant_segments) + 1}",
+                "type": "thinking",
+                "content": "",
+                "summary": "Thinking",
+                "status": "streaming",
+            }
+            assistant_segments.append(active_thinking_segment)
+        active_text_segment = None
+        active_thinking_segment["content"] = (
+            str(active_thinking_segment.get("content", "")) + delta
+        )
+
+    def _finish_thinking() -> None:
+        nonlocal active_thinking_segment
+        if active_thinking_segment:
+            active_thinking_segment["status"] = "complete"
+        active_thinking_segment = None
+
+    def _append_text_delta(delta: str) -> None:
+        nonlocal active_text_segment, active_thinking_segment
+        if not delta:
+            return
+        if not active_text_segment:
+            active_text_segment = {
+                "id": f"text-{len(assistant_segments) + 1}",
+                "type": "text",
+                "content": "",
+            }
+            assistant_segments.append(active_text_segment)
+        active_thinking_segment = None
+        active_text_segment["content"] = str(active_text_segment.get("content", "")) + delta
+
+    def _start_tool_call(data: dict[str, Any]) -> None:
+        nonlocal active_text_segment, active_thinking_segment
+        call_id = str(data.get("call_id") or f"tool-{len(tool_calls_by_id) + 1}")
+        arguments = data.get("arguments") if isinstance(data.get("arguments"), dict) else {}
+        tool_call = {
+            "id": call_id,
+            "name": str(data.get("tool") or ""),
+            "arguments": arguments,
+            "status": "running",
+            "startTime": int(_time.time() * 1000),
+        }
+        tool_calls_by_id[call_id] = tool_call
+        assistant_segments.append(
+            {
+                "id": f"tool-{call_id}",
+                "type": "tool",
+                "tool": tool_call,
+            }
+        )
+        active_text_segment = None
+        active_thinking_segment = None
+
+    def _finish_tool_call(data: dict[str, Any]) -> None:
+        call_id = str(data.get("call_id") or "")
+        if not call_id:
+            return
+        tool_call = tool_calls_by_id.get(call_id)
+        if not tool_call:
+            tool_call = {
+                "id": call_id,
+                "name": str(data.get("tool") or ""),
+                "arguments": {},
+                "status": "running",
+                "startTime": int(_time.time() * 1000),
+            }
+            tool_calls_by_id[call_id] = tool_call
+            assistant_segments.append(
+                {
+                    "id": f"tool-{call_id}",
+                    "type": "tool",
+                    "tool": tool_call,
+                }
+            )
+        success = bool(data.get("success"))
+        tool_call["status"] = "success" if success else "error"
+        tool_call["result"] = data.get("result")
+        if data.get("error") is not None:
+            tool_call["error"] = str(data.get("error"))
+        if data.get("duration_ms") is not None:
+            tool_call["duration"] = data.get("duration_ms")
+
     async def event_generator():
         """Generate SSE events from the agent loop and collect response."""
         nonlocal assistant_parts, thinking_parts
@@ -179,6 +287,7 @@ async def chat_stream(
             api_base=api_config.api_base if api_config else None,
             resources=getattr(request, 'resources', None),
         ):
+            event_name, event_data = _parse_sse_event(event_str)
             if "text_delta" in event_str or "markdown_delta" in event_str:
                 try:
                     _lines = event_str.strip().split("\n")
@@ -191,6 +300,7 @@ async def chat_stream(
                                 filtered = _filter_text_chunk(str(_content))
                                 if filtered:
                                     assistant_parts.append(filtered)
+                                    _append_text_delta(filtered)
                                 if filtered or not _content:
                                     new_data = _json.dumps({"content": filtered}, ensure_ascii=False)
                                     filtered_lines.append(f"data: {new_data}")
@@ -205,26 +315,44 @@ async def chat_stream(
                 except Exception:
                     yield event_str
                 continue
-            if "thinking_delta" in event_str:
+            if event_name == "thinking_start":
+                _append_thinking_delta("")
+            elif event_name == "thinking_delta":
                 try:
-                    _lines = event_str.strip().split("\n")
-                    for _line in _lines:
-                        if _line.startswith("data:"):
-                            _data = _json.loads(_line[5:].strip())
-                            _content = _data.get("content", "")
-                            if _content:
-                                thinking_parts.append(str(_content))
+                    _content = event_data.get("content", "")
+                    if _content:
+                        delta = str(_content)
+                        thinking_parts.append(delta)
+                        _append_thinking_delta(delta)
                 except Exception:
                     pass
+            elif event_name == "thinking_end":
+                _finish_thinking()
+            elif event_name == "tool_call_start":
+                _start_tool_call(event_data)
+            elif event_name == "tool_result":
+                _finish_tool_call(event_data)
+            elif event_name in {"message_end", "aborted", "error"}:
+                _finish_thinking()
             yield event_str
 
         # After streaming ends, store assistant response to DB
+        _finish_thinking()
         full_content = "".join(assistant_parts)
-        if full_content:
+        if full_content or assistant_segments or thinking_parts:
+            content_blocks: list[dict[str, Any]] = []
+            if full_content:
+                content_blocks.append({"type": "text", "text": full_content})
+            if assistant_segments:
+                content_blocks.append({"type": "segments", "segments": assistant_segments})
+            if tool_calls_by_id:
+                content_blocks.append(
+                    {"type": "tool_calls", "tool_calls": list(tool_calls_by_id.values())}
+                )
             assistant_msg = MessageModel(
                 conversation_id=conv_uuid,
                 role="assistant",
-                content=[{"type": "text", "text": full_content}],
+                content=content_blocks,
                 thinking_content="".join(thinking_parts) if thinking_parts else None,
                 model=request.model,
             )
@@ -342,7 +470,7 @@ async def polish_text(
     try:
         import openai
 
-        config = await _get_api_config_for_user(db, user.id, request.model)
+        config = await get_default_api_config(db, user.id, request.model)
         client = openai.AsyncOpenAI(api_key=config.api_key, base_url=config.api_base)
 
         response = await client.chat.completions.create(

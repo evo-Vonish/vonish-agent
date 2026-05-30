@@ -21,6 +21,8 @@ const CATEGORY_ICON_MAP: Record<ToolCategoryType, React.ComponentType<{ classNam
   workspace: LayoutIcon,
   python_ops: Code2,
   web_search: Globe,
+  web_ops: Globe,
+  shell_ops: Terminal,
   system: Terminal,
 };
 

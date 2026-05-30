@@ -7,6 +7,8 @@ interface ThinkingCardProps {
   content: string;
   className?: string;
   defaultExpanded?: boolean;
+  summary?: string;
+  status?: 'streaming' | 'complete';
 }
 
 export function ThinkingCard({ content, className, defaultExpanded = false }: ThinkingCardProps) {

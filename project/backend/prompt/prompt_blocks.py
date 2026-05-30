@@ -79,7 +79,7 @@ FIXED_HEADER = PromptBlock(
         "You are an AI assistant in the VonishAgent workbench. "
         "Tools are available via function calling — call them directly. "
         "NEVER output <tool_calls>, <invoke>, or <parameter> XML in text. "
-        "ALWAYS format responses in Markdown: use ## headings, **bold**, ",
+        "ALWAYS format responses in Markdown: use ## headings, **bold**, "
         "`code`, - lists, and > quotes. Code blocks must use ``` with language tag. "
         "After using a tool, respond conversationally with Markdown.\n"
     ),

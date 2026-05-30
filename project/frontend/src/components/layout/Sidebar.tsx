@@ -21,9 +21,31 @@ import { useI18n } from '@/i18n';
 import type { FileNode } from '@/types';
 import { formatTime } from '@/lib/utils';
 import { Tooltip } from '@/components/ui/Tooltip';
+import { searchConversations, type ConversationSearchResult } from '@/services/api';
 
 interface SidebarProps {
   className?: string;
+}
+
+function HighlightSnippet({ snippet, ranges }: { snippet: string; ranges: [number, number][] }) {
+  if (!ranges.length) return <>{snippet}</>;
+  const parts: React.ReactNode[] = [];
+  let last = 0;
+  ranges.forEach(([start, end], i) => {
+    if (start > last) {
+      parts.push(<span key={`t-${i}`}>{snippet.slice(last, start)}</span>);
+    }
+    parts.push(
+      <mark key={`m-${i}`} className="bg-primary/20 text-primary rounded px-0.5">
+        {snippet.slice(start, end)}
+      </mark>
+    );
+    last = end;
+  });
+  if (last < snippet.length) {
+    parts.push(<span key="tail">{snippet.slice(last)}</span>);
+  }
+  return <>{parts}</>;
 }
 
 function FileTreeItem({ node, depth = 0 }: { node: FileNode; depth?: number }) {
@@ -91,9 +113,12 @@ export function Sidebar({ className }: SidebarProps) {
   const [deleteMenuOpen, setDeleteMenuOpen] = useState<string | null>(null);
   const [renameOpen, setRenameOpen] = useState<string | null>(null);
   const [renameText, setRenameText] = useState('');
+  const [searchResults, setSearchResults] = useState<ConversationSearchResult[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const renameRef = useRef<HTMLInputElement>(null);
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (renameOpen && renameRef.current) renameRef.current.focus();
@@ -146,9 +171,40 @@ export function Sidebar({ className }: SidebarProps) {
     };
   }, []);
 
-  const filteredConversations = conversations.filter((c) =>
-    c.title.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // Debounced backend search
+  useEffect(() => {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    const q = searchQuery.trim();
+    if (!q) {
+      setSearchResults([]);
+      setSearchLoading(false);
+      return;
+    }
+    setSearchLoading(true);
+    searchTimerRef.current = setTimeout(async () => {
+      try {
+        const data = await searchConversations(q);
+        setSearchResults(data.results);
+      } catch {
+        setSearchResults([]);
+      } finally {
+        setSearchLoading(false);
+      }
+    }, 300);
+    return () => {
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    };
+  }, [searchQuery]);
+
+  const isSearching = searchQuery.trim().length > 0;
+  const displayConversations = isSearching
+    ? searchResults.map((r) => ({
+        id: r.conversation_id,
+        title: r.title,
+        updatedAt: new Date(r.updated_at).getTime(),
+        messageCount: r.matches.length,
+      }))
+    : conversations;
 
   // Mobile drawer overlay
   if (isMobile) {
@@ -191,27 +247,48 @@ export function Sidebar({ className }: SidebarProps) {
               </div>
               {/* Conversation list */}
               <div className="flex-1 overflow-y-auto px-1 pb-2 space-y-0.5">
-                {filteredConversations.map((conv) => (
-                  <button
-                    key={conv.id}
-                    className={cn(
-                      'w-full flex items-start gap-2 px-2.5 py-2 rounded-md text-left transition-colors',
-                      currentConversationId === conv.id
-                        ? 'bg-primary/10 text-foreground'
-                        : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground'
-                    )}
-                    onClick={() => {
-                      selectConversation(conv.id);
-                      setMobileSidebarOpen(false);
-                    }}
-                  >
-                    <MessageSquare className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-                    <div className="flex-1 min-w-0">
-                      <div className="text-xs font-medium truncate">{conv.title}</div>
-                      <div className="text-[10px] opacity-50 truncate">{conv.messageCount} 条消息 · {formatTime(conv.updatedAt)}</div>
-                    </div>
-                  </button>
-                ))}
+                {displayConversations.map((conv) => {
+                  const searchResult = isSearching
+                    ? searchResults.find((r) => r.conversation_id === conv.id)
+                    : undefined;
+                  return (
+                    <button
+                      key={conv.id}
+                      className={cn(
+                        'w-full flex items-start gap-2 px-2.5 py-2 rounded-md text-left transition-colors',
+                        currentConversationId === conv.id
+                          ? 'bg-primary/10 text-foreground'
+                          : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground'
+                      )}
+                      onClick={() => {
+                        selectConversation(conv.id);
+                        setMobileSidebarOpen(false);
+                        setSearchQuery('');
+                      }}
+                    >
+                      <MessageSquare className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs font-medium truncate">{conv.title}</div>
+                        {searchResult && searchResult.matches.length > 0 ? (
+                          <div className="space-y-0.5 mt-0.5">
+                            {searchResult.matches.slice(0, 2).map((m) => (
+                              <div key={m.message_id} className="text-[10px] text-foreground-subtle leading-tight">
+                                <span className="opacity-50">
+                                  {m.role === 'user' ? '我' : m.role === 'assistant' ? 'AI' : m.role}:
+                                </span>{' '}
+                                <HighlightSnippet snippet={m.snippet} ranges={m.highlight_ranges} />
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-[10px] opacity-50 truncate">
+                            {conv.messageCount} {t('chat.messages')} · {formatTime(conv.updatedAt)}
+                          </div>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             </aside>
           </>
@@ -370,95 +447,120 @@ export function Sidebar({ className }: SidebarProps) {
 
           {/* Conversation list */}
           <div className="flex-1 overflow-y-auto px-1.5 pb-2 space-y-0.5">
-            {filteredConversations.map((conv) => (
-              <div
-                key={conv.id}
-                className={cn(
-                  'group flex items-center gap-2 px-2.5 py-2 rounded-lg cursor-pointer transition-colors relative',
-                  currentConversationId === conv.id
-                    ? 'bg-primary/10 text-foreground'
-                    : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground'
-                )}
-                onClick={() => selectConversation(conv.id)}
-                onDoubleClick={() => {
-                  setRenameOpen(conv.id);
-                  setRenameText(conv.title);
-                }}
-              >
-                <MessageSquare className="w-3.5 h-3.5 flex-shrink-0" />
-                <div className="flex-1 min-w-0">
-                  {renameOpen === conv.id ? (
-                    <input
-                      ref={renameRef}
-                      value={renameText}
-                      onChange={(e) => setRenameText(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
+            {displayConversations.map((conv) => {
+              const searchResult = isSearching
+                ? searchResults.find((r) => r.conversation_id === conv.id)
+                : undefined;
+              return (
+                <div
+                  key={conv.id}
+                  className={cn(
+                    'group flex items-start gap-2 px-2.5 py-2 rounded-lg cursor-pointer transition-colors relative',
+                    currentConversationId === conv.id
+                      ? 'bg-primary/10 text-foreground'
+                      : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground'
+                  )}
+                  onClick={() => {
+                    selectConversation(conv.id);
+                    setSearchQuery('');
+                  }}
+                  onDoubleClick={() => {
+                    if (!isSearching) {
+                      setRenameOpen(conv.id);
+                      setRenameText(conv.title);
+                    }
+                  }}
+                >
+                  <MessageSquare className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    {renameOpen === conv.id && !isSearching ? (
+                      <input
+                        ref={renameRef}
+                        value={renameText}
+                        onChange={(e) => setRenameText(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            conv.title = renameText;
+                            setRenameOpen(null);
+                          }
+                          if (e.key === 'Escape') setRenameOpen(null);
+                        }}
+                        onBlur={() => {
                           conv.title = renameText;
                           setRenameOpen(null);
-                        }
-                        if (e.key === 'Escape') setRenameOpen(null);
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-full text-xs bg-background border border-primary/50 rounded px-1 py-0.5 text-foreground outline-none"
+                      />
+                    ) : (
+                      <>
+                        <div className="text-xs font-medium truncate">{conv.title}</div>
+                        {searchResult && searchResult.matches.length > 0 ? (
+                          <div className="space-y-0.5 mt-0.5">
+                            {searchResult.matches.slice(0, 2).map((m) => (
+                              <div key={m.message_id} className="text-[10px] text-foreground-subtle leading-tight">
+                                <span className="opacity-50">
+                                  {m.role === 'user' ? '我' : m.role === 'assistant' ? 'AI' : m.role}:
+                                </span>{' '}
+                                <HighlightSnippet snippet={m.snippet} ranges={m.highlight_ranges} />
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-[10px] opacity-50 truncate">
+                            {conv.messageCount} {t('chat.messages')} · {formatTime(conv.updatedAt)}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+
+                  {/* Delete button */}
+                  <div className="relative">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeleteMenuOpen(deleteMenuOpen === conv.id ? null : conv.id);
                       }}
-                      onBlur={() => {
-                        conv.title = renameText;
-                        setRenameOpen(null);
-                      }}
-                      onClick={(e) => e.stopPropagation()}
-                      className="w-full text-xs bg-background border border-primary/50 rounded px-1 py-0.5 text-foreground outline-none"
-                    />
-                  ) : (
-                    <div className="text-xs font-medium truncate">{conv.title}</div>
-                  )}
-                  <div className="text-[10px] opacity-50 truncate">
-                    {conv.messageCount} {t('chat.messages')} · {formatTime(conv.updatedAt)}
+                      className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-error/20 hover:text-error transition-all"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+
+                    {/* Confirmation popover */}
+                    {deleteMenuOpen === conv.id && (
+                      <>
+                        <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); setDeleteMenuOpen(null); }} />
+                        <div
+                          className="absolute right-0 top-full mt-1 w-48 bg-surface-elevated border border-border rounded-xl shadow-2xl py-2 z-50 animate-in fade-in slide-in-from-top-1 duration-150"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <p className="px-3 pb-2 text-[11px] text-foreground-muted border-b border-border">
+                            {t('chat.deleteConfirm')}
+                          </p>
+                          <button
+                            onClick={() => {
+                              deleteConversation(conv.id);
+                              setDeleteMenuOpen(null);
+                            }}
+                            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-error hover:bg-error/10 transition-colors"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            {t('chat.delete')}
+                          </button>
+                          <button
+                            onClick={() => setDeleteMenuOpen(null)}
+                            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-foreground-muted hover:bg-surface-hover transition-colors"
+                          >
+                            {t('chat.cancel')}
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
-
-                {/* Delete button */}
-                <div className="relative">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setDeleteMenuOpen(deleteMenuOpen === conv.id ? null : conv.id);
-                    }}
-                    className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-error/20 hover:text-error transition-all"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                  </button>
-
-                  {/* Confirmation popover */}
-                  {deleteMenuOpen === conv.id && (
-                    <>
-                      <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); setDeleteMenuOpen(null); }} />
-                      <div
-                        className="absolute right-0 top-full mt-1 w-48 bg-surface-elevated border border-border rounded-xl shadow-2xl py-2 z-50 animate-in fade-in slide-in-from-top-1 duration-150"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <p className="px-3 pb-2 text-[11px] text-foreground-muted border-b border-border">
-                          {t('chat.deleteConfirm')}
-                        </p>
-                        <button
-                          onClick={() => {
-                            deleteConversation(conv.id);
-                            setDeleteMenuOpen(null);
-                          }}
-                          className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-error hover:bg-error/10 transition-colors"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          {t('chat.delete')}
-                        </button>
-                        <button
-                          onClick={() => setDeleteMenuOpen(null)}
-                          className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-foreground-muted hover:bg-surface-hover transition-colors"
-                        >
-                          {t('chat.cancel')}
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </>
       )}

@@ -18,11 +18,13 @@ import { ToolToggle } from './ToolToggle';
 import { useToolStore } from '@/stores/useToolStore';
 import { useI18n } from '@/i18n';
 
-const CATEGORY_ICON_MAP = {
+const CATEGORY_ICON_MAP: Record<string, React.ComponentType<any>> = {
   file_ops: FolderOpen,
   workspace: LayoutIcon,
   python_ops: Code2,
   web_search: Globe,
+  web_ops: Globe,
+  shell_ops: Terminal,
   system: Terminal,
 };
 

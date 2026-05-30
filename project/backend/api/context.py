@@ -362,7 +362,7 @@ async def get_context_usage(
     """Get token usage statistics for a conversation.
 
     Returns current token consumption, budget status, and per-component
-    breakdown. This does not modify the context.
+    breakdown. Uses real database queries via ContextTracker.
 
     Args:
         conversation_id: Conversation ID.
@@ -370,49 +370,29 @@ async def get_context_usage(
         profile_name: Context profile name.
     """
     try:
-        from context.model_capability import resolve_model_capability
-        from context.context_profile import scale_profile_for_model
+        from services.context_tracker import get_context_tracker
 
-        # Resolve model and profile
-        model = resolve_model_capability(model_id)
-        profile = get_profile(profile_name)
-        scaled = scale_profile_for_model(profile, model)
-
-        # Calculate budget
-        budget = calculate_token_budget(scaled, model)
-
-        # Estimate current usage (simplified — production would query DB)
-        # In production, query the actual message and memory counts
-        estimated_usage = int(budget.available_input_budget * 0.6)
-        budget.set_usage(estimated_usage)
-
-        status = budget.check_budget()
-
-        # Component estimates
-        components = {
-            "system_prompt": budget.get_component_budget("system_prompt"),
-            "user_memory": budget.get_component_budget("user_memory"),
-            "cycle_briefing": budget.get_component_budget("cycle_briefing"),
-            "workspace_refs": budget.get_component_budget("workspace_refs"),
-            "workspace_chunks": budget.get_component_budget("workspace_chunks"),
-            "tool_definitions": budget.get_component_budget("tool_definitions"),
-            "recent_messages": budget.get_component_budget("recent_messages"),
-            "current_query": budget.get_component_budget("current_query"),
-        }
+        tracker = get_context_tracker()
+        snapshot = await tracker.snapshot(
+            conversation_id=conversation_id,
+            db=db,
+            model_id=model_id,
+            profile_name=profile_name,
+        )
 
         return UsageResponse(
             conversation_id=conversation_id,
-            total_tokens=estimated_usage,
-            max_tokens=model.context_window,
-            available_budget=budget.available_input_budget,
-            output_reserved=budget.output_reserved,
-            safety_margin=budget.safety_margin_tokens,
-            profile=scaled.name,
+            total_tokens=snapshot.total_estimated_tokens,
+            max_tokens=snapshot.max_input_tokens,
+            available_budget=snapshot.available_budget,
+            output_reserved=snapshot.output_reserved,
+            safety_margin=snapshot.safety_margin,
+            profile=snapshot.profile_name,
             model=model_id,
-            usage_ratio=round(status.usage_ratio, 4),
-            compression_level=status.compression_level,
-            budget_healthy=status.is_healthy,
-            components=components,
+            usage_ratio=round(snapshot.usage_ratio, 4),
+            compression_level=snapshot.compression_level,
+            budget_healthy=snapshot.budget_healthy,
+            components=snapshot.components,
         )
 
     except ValueError as e:

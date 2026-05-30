@@ -1,4 +1,4 @@
-export type ToolCategoryType = 'file_ops' | 'web_search' | 'workspace' | 'system';
+export type ToolCategoryType = 'file_ops' | 'web_search' | 'web_ops' | 'workspace' | 'python_ops' | 'shell_ops' | 'system';
 
 export type ToolCapability = 'read_only' | 'writes_files' | 'requires_approval';
 
@@ -41,6 +41,9 @@ export const CATEGORY_ICONS: Record<ToolCategoryType, string> = {
   file_ops: 'FolderOpen',
   workspace: 'Layout',
   web_search: 'Globe',
+  web_ops: 'Globe',
+  python_ops: 'Code2',
+  shell_ops: 'Terminal',
   system: 'Terminal',
 };
 
@@ -48,5 +51,8 @@ export const CATEGORY_LABELS: Record<ToolCategoryType, string> = {
   file_ops: 'File Operations',
   workspace: 'Workspace',
   web_search: 'Web Search',
+  web_ops: 'Web Fetch',
+  python_ops: 'Python',
+  shell_ops: 'Shell',
   system: 'System',
 };

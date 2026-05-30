@@ -66,9 +66,18 @@ async def list_tools(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """List all available tools."""
+    """List all available tools with full metadata."""
     registry = ToolRegistry()
-    tools = registry.list_for_json_schema()
+    tools = [
+        {
+            "name": t.name,
+            "description": t.description,
+            "category": t.category,
+            "requires_confirmation": t.requires_confirmation,
+            "schema": t.parameters,
+        }
+        for t in registry.list_for_context()
+    ]
 
     return ToolListResponse(
         tools=tools,

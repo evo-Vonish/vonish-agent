@@ -111,6 +111,28 @@ export async function listConversations(): Promise<Conversation[]> {
   }));
 }
 
+export interface SearchMatch {
+  message_id: string;
+  role: string;
+  snippet: string;
+  highlight_ranges: [number, number][];
+}
+
+export interface ConversationSearchResult {
+  conversation_id: string;
+  title: string;
+  updated_at: string;
+  matches: SearchMatch[];
+}
+
+export async function searchConversations(
+  query: string,
+): Promise<{ results: ConversationSearchResult[]; total: number }> {
+  const response = await fetch(`/api/conversations/search?q=${encodeURIComponent(query)}`);
+  if (!response.ok) throw new Error(`Search failed: HTTP ${response.status}`);
+  return (await response.json()) as { results: ConversationSearchResult[]; total: number };
+}
+
 export async function createConversation(
   title: string,
   model: string,
@@ -407,7 +429,86 @@ export async function setDefaultApiConfig(id: string): Promise<ApiConfig> {
   return toApiConfig((await response.json()) as BackendApiConfig);
 }
 
+// ── Context Usage API ──────────────────────────────────────────────────
+
+export interface ContextUsageData {
+  conversation_id: string;
+  total_tokens: number;
+  max_tokens: number;
+  available_budget: number;
+  output_reserved: number;
+  safety_margin: number;
+  profile: string;
+  model: string;
+  usage_ratio: number;
+  compression_level: string;
+  budget_healthy: boolean;
+  components: Record<string, number>;
+  message_count: number;
+  user_message_count: number;
+  tool_call_count: number;
+  workspace_file_count: number;
+  memory_item_count: number;
+}
+
+export async function getContextUsage(
+  conversationId: string,
+  modelId: string,
+  profileName = 'balanced',
+): Promise<ContextUsageData> {
+  const params = new URLSearchParams({ model_id: modelId, profile_name: profileName });
+  const response = await fetch(`/api/context/${conversationId}/usage?${params}`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch context usage: HTTP ${response.status}`);
+  }
+  return (await response.json()) as ContextUsageData;
+}
+
+export async function switchContextProfile(
+  conversationId: string,
+  profileName: string,
+): Promise<{ status: string; profile: string }> {
+  const response = await fetch(`/api/context/${conversationId}/profile`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ profile: profileName }),
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to switch profile: HTTP ${response.status}`);
+  }
+  return (await response.json()) as { status: string; profile: string };
+}
+
+export async function compactContext(
+  conversationId: string,
+  profileName = 'balanced',
+  modelId = 'deepseek-chat',
+): Promise<{ status: string; compression_level: string; tokens_saved: number; warnings: string[] }> {
+  const params = new URLSearchParams({ profile_name: profileName, model_id: modelId });
+  const response = await fetch(`/api/context/${conversationId}/compact?${params}`, {
+    method: 'POST',
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to compact context: HTTP ${response.status}`);
+  }
+  return (await response.json()) as { status: string; compression_level: string; tokens_saved: number; warnings: string[] };
+}
+
 // ── Tool Configuration API ────────────────────────────────────────────
+
+export interface BackendTool {
+  name: string;
+  description: string;
+  category: string;
+  requires_confirmation: boolean;
+  schema: Record<string, unknown>;
+}
+
+export async function listTools(): Promise<{ tools: BackendTool[]; total: number }> {
+  const response = await fetch('/api/tools');
+  if (!response.ok) throw new Error(`Failed to load tools: HTTP ${response.status}`);
+  return (await response.json()) as { tools: BackendTool[]; total: number };
+}
 
 export async function fetchToolConfigs(): Promise<{ tools: Record<string, boolean> }> {
   const response = await fetch('/api/tools/config');
