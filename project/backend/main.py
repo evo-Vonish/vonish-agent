@@ -66,6 +66,10 @@ async def lifespan(app: FastAPI):
 
         register_default_tools()
         logger.info("Default tools registered.")
+
+        # Sync tool configs to cover all registered tools
+        from api.prompt import _sync_tool_configs_from_registry
+        _sync_tool_configs_from_registry()
     except Exception as e:
         logger.error(f"Tool registration failed: {e}")
 

@@ -294,6 +294,7 @@ class ToolExecutor:
             "read_file": self._handle_read_file,
             "file_read": self._handle_file_read,
             "edit_file": self._handle_edit_file,
+            "write_to_file": self._handle_write_to_file,
             "shell_command": self._handle_shell_command,
             "ipython": self._handle_ipython,
             "web_fetch": self._handle_web_fetch,
@@ -368,6 +369,30 @@ class ToolExecutor:
             new_text=new_string,
         )
         return self._tool_result_payload(result)
+
+    async def _handle_write_to_file(
+        self,
+        path: str,
+        content: str,
+        conversation_id: str = "",
+        **_: Any,
+    ) -> dict[str, Any]:
+        """Create or overwrite a file in the workspace."""
+        ws = self._workspace_dir(conversation_id)
+        fp = (ws / path).resolve()
+        if not str(fp).startswith(str(ws)):
+            return {"success": False, "path": path, "error": "Path escape blocked"}
+        try:
+            fp.parent.mkdir(parents=True, exist_ok=True)
+            fp.write_text(content, encoding="utf-8")
+            return {
+                "success": True,
+                "path": path,
+                "size": len(content),
+                "lines": content.count("\n") + 1,
+            }
+        except Exception as e:
+            return {"success": False, "path": path, "error": str(e)}
 
     async def _handle_shell_command(
         self,

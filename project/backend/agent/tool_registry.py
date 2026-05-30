@@ -288,6 +288,30 @@ def register_default_tools() -> None:
         )
     )
 
+    # Write to File (create or overwrite)
+    registry.register(
+        ToolDefinition(
+            name="write_to_file",
+            description="Create or overwrite a file in the workspace with the given content. For new files, use this. For modifying existing files, use edit_file.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Relative path to the file (created if not exists)",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Full content to write to the file",
+                    },
+                },
+                "required": ["path", "content"],
+            },
+            category="file_ops",
+            requires_confirmation=True,
+        )
+    )
+
     # Shell Command
     registry.register(
         ToolDefinition(

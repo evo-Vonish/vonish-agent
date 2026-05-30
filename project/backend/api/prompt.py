@@ -15,13 +15,39 @@ router = APIRouter(prefix="/api")
 
 # ── In-memory tool config (migrate to DB later) ──────────────────────────
 _tool_configs: dict[str, bool] = {
+    # File Ops
     "read_file": True,
+    "file_read": True,
     "edit_file": True,
+    "write_to_file": True,
+    "delete_file": True,
+    "apply_patch": True,
+    # Workspace
+    "list_directory": True,
+    "snapshot": True,
+    # Shell / Python
     "shell_command": True,
     "ipython": True,
+    # Web
     "web_fetch": True,
     "web_search": True,
+    # Human Interaction
+    "set_todo_list": True,
+    "ask_user_question": True,
+    "request_approval": True,
 }
+
+def _sync_tool_configs_from_registry() -> None:
+    """Ensure _tool_configs covers all registered tools."""
+    try:
+        from agent.tool_registry import ToolRegistry
+        registry = ToolRegistry()
+        for name in registry.list_all():
+            if name not in _tool_configs:
+                _tool_configs[name] = True
+                logger.info(f"Auto-registered tool in config: {name}")
+    except Exception:
+        pass
 
 
 def get_enabled_tools() -> list[str]:
