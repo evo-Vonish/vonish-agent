@@ -3,6 +3,7 @@ import {
   FolderOpen,
   Globe,
   Terminal,
+  Code2,
   ChevronDown,
   ChevronUp,
   Power,
@@ -11,13 +12,14 @@ import {
 import { useShallow } from 'zustand/shallow';
 import { cn } from '@/lib/utils';
 import type { ToolCategoryType } from '@/types/tools';
-import { CATEGORY_LABELS } from '@/types/tools';
 import { useToolStore } from '@/stores/useToolStore';
+import { useI18n } from '@/i18n';
 import { ToolCard } from './ToolCard';
 
 const CATEGORY_ICON_MAP: Record<ToolCategoryType, React.ComponentType<{ className?: string }>> = {
   file_ops: FolderOpen,
   workspace: LayoutIcon,
+  python_ops: Code2,
   web_search: Globe,
   system: Terminal,
 };
@@ -51,6 +53,7 @@ interface ToolCategorySectionProps {
 export function ToolCategorySection({ category, searchQuery = '' }: ToolCategorySectionProps) {
   const [collapsed, setCollapsed] = useState(false);
   const normalizedQuery = searchQuery.trim().toLowerCase();
+  const { t } = useI18n();
   const tools = useToolStore(
     useShallow((s) =>
       s.tools.filter(
@@ -66,7 +69,7 @@ export function ToolCategorySection({ category, searchQuery = '' }: ToolCategory
   const disableCategory = useToolStore((s) => s.disableCategory);
 
   const IconComponent = CATEGORY_ICON_MAP[category];
-  const label = CATEGORY_LABELS[category];
+  const label = t(`toolCategory.${category}`);
   const enabledCount = tools.filter((t) => t.isEnabled).length;
   const totalCount = tools.length;
   const allEnabled = enabledCount === totalCount && totalCount > 0;
@@ -93,7 +96,7 @@ export function ToolCategorySection({ category, searchQuery = '' }: ToolCategory
           <IconComponent className="w-4 h-4 text-foreground-muted group-hover:text-foreground transition-colors" />
           <h3 className="text-sm font-semibold text-foreground">{label}</h3>
           <span className="text-xs text-foreground-subtle">
-            ({enabledCount}/{totalCount} tools)
+            ({enabledCount}/{totalCount})
           </span>
           <span className="text-foreground-subtle group-hover:text-foreground transition-colors">
             {collapsed ? (
@@ -107,11 +110,11 @@ export function ToolCategorySection({ category, searchQuery = '' }: ToolCategory
         <div className="flex items-center gap-2">
           {/* Status indicator */}
           {allDisabled ? (
-            <span className="text-[10px] text-foreground-subtle">— all disabled</span>
+            <span className="text-[10px] text-foreground-subtle">— {t('tool.allDisabled')}</span>
           ) : allEnabled ? (
-            <span className="text-[10px] text-success">— all enabled</span>
+            <span className="text-[10px] text-success">— {t('tool.allEnabled')}</span>
           ) : (
-            <span className="text-[10px] text-warning">— partial</span>
+            <span className="text-[10px] text-warning">— {t('tool.partial')}</span>
           )}
 
           {/* Enable/Disable all button */}
@@ -127,12 +130,12 @@ export function ToolCategorySection({ category, searchQuery = '' }: ToolCategory
             {allEnabled ? (
               <>
                 <PowerOff className="w-3 h-3" />
-                Disable All
+                {t('tool.disableAll')}
               </>
             ) : (
               <>
                 <Power className="w-3 h-3" />
-                Enable All
+                {t('tool.enableAll')}
               </>
             )}
           </button>

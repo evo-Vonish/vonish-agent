@@ -2,6 +2,7 @@ import { useState, useRef, useCallback } from 'react';
 import { Send, Paperclip, Mic, Sparkles, Square } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useChatStore } from '@/stores/chatStore';
+import { useI18n } from '@/i18n';
 import { ModelSelector } from './ModelSelector';
 
 interface ComposerProps {
@@ -12,6 +13,7 @@ export function Composer({ className }: ComposerProps) {
   const [text, setText] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { sendMessage, stopGeneration, isStreaming } = useChatStore();
+  const { t } = useI18n();
 
   const handleSend = useCallback(() => {
     const trimmed = text.trim();
@@ -72,7 +74,7 @@ export function Composer({ className }: ComposerProps) {
               handleInput();
             }}
             onKeyDown={handleKeyDown}
-            placeholder={isStreaming ? 'Agent 正在生成中...' : '输入消息... (Ctrl+Enter 发送)'}
+            placeholder={isStreaming ? t('chat.streaming.placeholder') : `${t('chat.input.placeholder')} (${t('chat.ctrlEnter')})`}
             rows={1}
             disabled={isStreaming}
             className="flex-1 bg-transparent text-sm text-foreground placeholder:text-foreground-subtle resize-none outline-none max-h-[200px] py-1 disabled:opacity-50"
@@ -81,7 +83,7 @@ export function Composer({ className }: ComposerProps) {
             <button
               onClick={stopGeneration}
               className="p-2 rounded-lg transition-all flex-shrink-0 mb-0.5 bg-error text-white hover:bg-error/80 animate-pulse"
-              title="停止生成"
+              title={t('chat.stop')}
             >
               <Square className="w-4 h-4" fill="currentColor" />
             </button>

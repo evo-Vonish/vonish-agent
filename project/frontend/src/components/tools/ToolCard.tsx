@@ -16,6 +16,7 @@ import type { ToolDefinition, ApprovalLevel } from '@/types/tools';
 import { APPROVAL_LEVEL_COLORS, APPROVAL_LEVEL_LABELS } from '@/types/tools';
 import { ToolToggle } from './ToolToggle';
 import { useToolStore } from '@/stores/useToolStore';
+import { useI18n } from '@/i18n';
 
 const CATEGORY_ICON_MAP = {
   file_ops: FolderOpen,
@@ -55,6 +56,7 @@ export function ToolCard({ tool }: ToolCardProps) {
   const [copied, setCopied] = useState(false);
   const schemaRef = useRef<HTMLPreElement>(null);
   const toggleTool = useToolStore((s) => s.toggleTool);
+  const { t } = useI18n();
 
   const IconComponent = CATEGORY_ICON_MAP[tool.category] || FileText;
 
@@ -127,7 +129,7 @@ export function ToolCard({ tool }: ToolCardProps) {
       >
         <div className="px-4 pb-3 border-t border-border">
           <div className="flex items-center justify-between py-2">
-            <span className="text-xs font-medium text-foreground-muted">JSON Schema</span>
+            <span className="text-xs font-medium text-foreground-muted">{t('tool.schema')}</span>
             <button
               onClick={handleCopySchema}
               className={cn(
@@ -140,12 +142,12 @@ export function ToolCard({ tool }: ToolCardProps) {
               {copied ? (
                 <>
                   <Check className="w-3 h-3" />
-                  Copied
+                  {t('tool.copySchemaDone')}
                 </>
               ) : (
                 <>
                   <Copy className="w-3 h-3" />
-                  Copy
+                  {t('tool.copySchema')}
                 </>
               )}
             </button>
@@ -159,16 +161,16 @@ export function ToolCard({ tool }: ToolCardProps) {
           {/* Tool metadata */}
           <div className="flex flex-wrap gap-3 mt-2 text-[10px] text-foreground-subtle">
             <span className="flex items-center gap-1">
-              <span className="text-foreground-muted">Capabilities:</span>
+              <span className="text-foreground-muted">{t('tool.capabilities')}:</span>
               <span>{tool.capabilities.join(', ') || 'none'}</span>
             </span>
             <span className="flex items-center gap-1">
-              <span className="text-foreground-muted">Parallel:</span>
-              <span>{tool.supportsParallel ? 'Yes' : 'No'}</span>
+              <span className="text-foreground-muted">{t('tool.parallel')}:</span>
+              <span>{tool.supportsParallel ? t('tool.yes') : t('tool.no')}</span>
             </span>
             <span className="flex items-center gap-1">
-              <span className="text-foreground-muted">Read-only:</span>
-              <span>{tool.isReadOnly ? 'Yes' : 'No'}</span>
+              <span className="text-foreground-muted">{t('tool.readonly')}:</span>
+              <span>{tool.isReadOnly ? t('tool.yes') : t('tool.no')}</span>
             </span>
             {tool.lastUsed && (
               <span className="flex items-center gap-1">

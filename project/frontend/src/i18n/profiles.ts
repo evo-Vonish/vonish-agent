@@ -1,0 +1,58 @@
+import type { LanguageProfile } from "./types";
+
+export const profiles: Record<string, LanguageProfile> = {
+  "zh-CN": {
+    locale: "zh-CN",
+    label: "Chinese Simplified",
+    nativeLabel: "中文（简体）",
+    direction: "ltr",
+    tone: ["简洁", "工程化", "低废话", "状态明确"],
+    avoid: ["客服腔", "营销腔", "冗长敬语"],
+    systemStyleHint: "使用简体中文。界面文案保持简洁、工程化、现代。动词优先。",
+  },
+  "en-US": {
+    locale: "en-US",
+    label: "English",
+    nativeLabel: "English",
+    direction: "ltr",
+    tone: ["clean", "concise", "developer-first", "modern", "direct"],
+    avoid: ["corporate fluff", "over-explaining", "marketing tone"],
+    systemStyleHint: "Use concise, developer-friendly English. Short labels. No fluff.",
+  },
+  "ja-JP": {
+    locale: "ja-JP",
+    label: "Japanese",
+    nativeLabel: "日本語",
+    direction: "ltr",
+    tone: ["簡潔", "現代的", "開発者向け", "控えめ", "軽量"],
+    avoid: ["過剰敬語", "長文", "マーケティング調"],
+    systemStyleHint: "簡潔で現代的、開発者向けの日本語UI。短いラベルを優先。",
+  },
+  "ko-KR": {
+    locale: "ko-KR",
+    label: "Korean",
+    nativeLabel: "한국어",
+    direction: "ltr",
+    tone: ["간결한", "현대적인", "개발자 지향", "담백한"],
+    avoid: ["과도한 존댓말", "마케팅 어조", "장문"],
+    systemStyleHint: "간결하고 현대적인 개발자 중심 한국어 UI. 짧은 레이블 사용.",
+  },
+  "fr-FR": {
+    locale: "fr-FR",
+    label: "French",
+    nativeLabel: "Français",
+    direction: "ltr",
+    tone: ["sobre", "clair", "moderne", "technique", "concis"],
+    avoid: ["ton marketing", "phrases longues", "formules excessives"],
+    systemStyleHint: "Interface sobre et moderne. Phrases courtes. Style technique.",
+  },
+  "de-DE": {
+    locale: "de-DE",
+    label: "German",
+    nativeLabel: "Deutsch",
+    direction: "ltr",
+    tone: ["klar", "präzise", "technisch", "modern", "knapp"],
+    avoid: ["Verwaltungssprache", "Marketingsprache", "lange Sätze"],
+    systemStyleHint: "Klare, präzise, technische UI-Texte. Kurze Begriffe. Kein Marketing-Jargon.",
+  },
+};

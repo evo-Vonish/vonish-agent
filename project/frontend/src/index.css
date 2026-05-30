@@ -165,4 +165,9 @@
   ::selection {
     @apply bg-primary/30 text-foreground;
   }
+
+  /* i18n language switch fade */
+  .i18n-fade {
+    transition: opacity 120ms ease;
+  }
 }

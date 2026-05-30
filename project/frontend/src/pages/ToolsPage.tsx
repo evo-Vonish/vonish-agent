@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Plus, Wrench, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToolStore } from '@/stores/useToolStore';
+import { useI18n } from '@/i18n';
 import { ToolCategorySection } from '@/components/tools/ToolCategorySection';
 import { AddToolModal } from '@/components/tools/AddToolModal';
 import type { ToolCategoryType } from '@/types/tools';
@@ -11,6 +12,7 @@ const CATEGORY_ORDER: ToolCategoryType[] = ['file_ops', 'workspace', 'python_ops
 export default function ToolsPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const { t } = useI18n();
 
   const tools = useToolStore((s) => s.tools);
   const enabledCount = tools.filter((t) => t.isEnabled).length;
@@ -39,9 +41,9 @@ export default function ToolsPage() {
               <Wrench className="w-4 h-4 text-primary" />
             </div>
             <div>
-              <h1 className="text-base font-semibold text-foreground">Tool Management</h1>
+              <h1 className="text-base font-semibold text-foreground">{t('tool.title')}</h1>
               <p className="text-[11px] text-foreground-muted">
-                {enabledCount} of {totalCount} tools enabled
+                {t('tool.enabled', { enabled: String(enabledCount), total: String(totalCount) })}
               </p>
             </div>
           </div>

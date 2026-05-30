@@ -2,6 +2,9 @@ import { useState, useRef, useEffect } from 'react';
 import { Globe, User, Settings, ChevronUp, LogOut } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
+import { useLanguageStore } from '@/stores/languageStore';
+import { useI18n } from '@/i18n';
+import type { Locale } from '@/i18n';
 import { Tooltip } from '@/components/ui/Tooltip';
 
 interface StatusBarProps {
@@ -37,20 +40,22 @@ function PopoverMenu({
   );
 }
 
+const LANGUAGES: { labelKey: string; code: Locale }[] = [
+  { labelKey: 'lang.en', code: 'en-US' },
+  { labelKey: 'lang.zh', code: 'zh-CN' },
+  { labelKey: 'lang.ja', code: 'ja-JP' },
+  { labelKey: 'lang.ko', code: 'ko-KR' },
+  { labelKey: 'lang.fr', code: 'fr-FR' },
+  { labelKey: 'lang.de', code: 'de-DE' },
+];
+
 export function StatusBar({ className }: StatusBarProps) {
   const { isMobile, toggleRightPanel } = useUIStore();
+  const { t } = useI18n();
+  const locale = useLanguageStore((s) => s.locale);
+  const setLocale = useLanguageStore((s) => s.setLocale);
   const [acctOpen, setAcctOpen] = useState(false);
   const [langOpen, setLangOpen] = useState(false);
-
-  const languages = [
-    { label: 'English', code: 'en' },
-    { label: '中文 (简体)', code: 'zh' },
-    { label: '日本語', code: 'ja' },
-    { label: '한국어', code: 'ko' },
-    { label: 'Français', code: 'fr' },
-    { label: 'Deutsch', code: 'de' },
-  ];
-  const [lang, setLang] = useState('zh');
 
   if (isMobile) {
     return (
@@ -65,7 +70,7 @@ export function StatusBar({ className }: StatusBarProps) {
           className="flex items-center gap-1 px-2 py-1 rounded-full bg-surface border border-border text-[10px] text-foreground-muted hover:text-foreground transition-colors"
         >
           <Settings className="w-3 h-3" />
-          设置
+          {t('statusbar.settings')}
         </button>
       </footer>
     );
@@ -79,10 +84,10 @@ export function StatusBar({ className }: StatusBarProps) {
       )}
     >
       {/* Left: Claude Code style buttons — Account / Settings / Language */}
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1 i18n-fade">
         {/* Account */}
         <div className="relative">
-          <Tooltip content="Account">
+          <Tooltip content={t('statusbar.account')}>
             <button
               onClick={() => { setAcctOpen(!acctOpen); setLangOpen(false); }}
               className={cn(
@@ -93,35 +98,35 @@ export function StatusBar({ className }: StatusBarProps) {
               )}
             >
               <User className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Account</span>
+              <span className="hidden sm:inline">{t('statusbar.account')}</span>
             </button>
           </Tooltip>
           <PopoverMenu open={acctOpen} onClose={() => setAcctOpen(false)}>
             <div className="px-3 py-2 border-b border-border">
-              <p className="text-xs font-semibold text-foreground">Developer</p>
-              <p className="text-[10px] text-foreground-subtle">dev@example.com</p>
+              <p className="text-xs font-semibold text-foreground">{t('statusbar.dev')}</p>
+              <p className="text-[10px] text-foreground-subtle">{t('statusbar.email')}</p>
             </div>
             <button className="w-full flex items-center gap-2 px-3 py-2 text-xs text-foreground-muted hover:text-foreground hover:bg-surface-hover transition-colors">
               <LogOut className="w-3.5 h-3.5" />
-              Sign out
+              {t('statusbar.signout')}
             </button>
           </PopoverMenu>
         </div>
 
         {/* Settings */}
-        <Tooltip content="Settings">
+        <Tooltip content={t('statusbar.settings')}>
           <button
             onClick={toggleRightPanel}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] text-foreground-muted hover:text-foreground hover:bg-surface-hover transition-colors"
           >
             <Settings className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Settings</span>
+            <span className="hidden sm:inline">{t('statusbar.settings')}</span>
           </button>
         </Tooltip>
 
         {/* Language */}
         <div className="relative">
-          <Tooltip content="Language">
+          <Tooltip content={t('statusbar.language')}>
             <button
               onClick={() => { setLangOpen(!langOpen); setAcctOpen(false); }}
               className={cn(
@@ -132,30 +137,30 @@ export function StatusBar({ className }: StatusBarProps) {
               )}
             >
               <Globe className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Language</span>
+              <span className="hidden sm:inline">{t('statusbar.language')}</span>
             </button>
           </Tooltip>
           <PopoverMenu open={langOpen} onClose={() => setLangOpen(false)}>
-            {languages.map((l) => (
+            {LANGUAGES.map((l) => (
               <button
                 key={l.code}
-                onClick={() => { setLang(l.code); setLangOpen(false); }}
+                onClick={() => { setLocale(l.code); setLangOpen(false); }}
                 className={cn(
                   'w-full flex items-center justify-between px-3 py-2 text-xs hover:bg-surface-hover transition-colors',
-                  lang === l.code ? 'text-foreground' : 'text-foreground-muted'
+                  locale === l.code ? 'text-foreground' : 'text-foreground-muted'
                 )}
               >
-                {l.label}
-                {lang === l.code && <span className="w-1.5 h-1.5 rounded-full bg-primary" />}
+                {t(l.labelKey)}
+                {locale === l.code && <span className="w-1.5 h-1.5 rounded-full bg-primary" />}
               </button>
             ))}
           </PopoverMenu>
         </div>
       </div>
 
-      {/* Right: simple collapse chevron for mobile-like expand (desktop only indicator) */}
+      {/* Right: collapse hint */}
       <div className="flex items-center">
-        <Tooltip content="Collapse sidebar">
+        <Tooltip content={t('statusbar.collapseHint')}>
           <button className="p-1.5 rounded-md text-foreground-subtle hover:text-foreground hover:bg-surface-hover transition-colors">
             <ChevronUp className="w-3.5 h-3.5" />
           </button>

@@ -4,6 +4,7 @@ import type { Message } from '@/types';
 import { MessageBubble } from './MessageBubble';
 import { useChatStore } from '@/stores/chatStore';
 import { useUIStore } from '@/stores/uiStore';
+import { useI18n } from '@/i18n';
 import { MessageSquare, Zap, Code2, Database, FileCode, Palette } from 'lucide-react';
 import { suggestionQuestions } from '@/services/mockData';
 
@@ -12,16 +13,17 @@ interface MessageStreamProps {
 }
 
 const quickActions = [
-  { icon: Code2, label: '写代码', color: 'text-blue-400' },
-  { icon: Database, label: '数据分析', color: 'text-green-400' },
-  { icon: FileCode, label: '调试 Bug', color: 'text-yellow-400' },
-  { icon: Palette, label: 'UI 设计', color: 'text-purple-400' },
+  { icon: Code2, key: 'chat.empty.code', color: 'text-blue-400' },
+  { icon: Database, key: 'chat.empty.analysis', color: 'text-green-400' },
+  { icon: FileCode, key: 'chat.empty.debug', color: 'text-yellow-400' },
+  { icon: Palette, key: 'chat.empty.design', color: 'text-purple-400' },
 ];
 
 export function MessageStream({ className }: MessageStreamProps) {
   const messages = useChatStore((s) => s.messages);
   const { sendMessage } = useChatStore();
   const { isMobile } = useUIStore();
+  const { t } = useI18n();
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [userScrolled, setUserScrolled] = useState(false);
@@ -65,25 +67,21 @@ export function MessageStream({ className }: MessageStreamProps) {
           </div>
 
           <div>
-            <h2 className="text-lg font-semibold text-foreground mb-1.5">
-              What can I help you with?
-            </h2>
-            <p className="text-xs text-foreground-subtle leading-relaxed">
-              我是 vonish Agent，一个智能编程助手。我可以帮你写代码、调试 Bug、分析数据、设计界面等。
-            </p>
+            <h2 className="text-lg font-semibold text-foreground mb-1.5">{t('chat.empty')}</h2>
+            <p className="text-xs text-foreground-subtle leading-relaxed">{t('chat.empty.desc')}</p>
           </div>
 
           {/* Quick actions */}
           <div className={cn('grid gap-2', isMobile ? 'grid-cols-2' : 'grid-cols-4')}>
             {quickActions.map((action) => (
               <button
-                key={action.label}
-                onClick={() => sendMessage(`帮我${action.label}`)}
+                key={action.key}
+                onClick={() => sendMessage(t(action.key))}
                 className="flex flex-col items-center gap-1.5 p-3 rounded-xl bg-surface border border-border hover:border-primary/30 hover:bg-surface-hover transition-all group"
               >
                 <action.icon className={cn('w-5 h-5', action.color)} />
                 <span className="text-[10px] text-foreground-muted group-hover:text-foreground transition-colors">
-                  {action.label}
+                  {t(action.key)}
                 </span>
               </button>
             ))}
@@ -91,7 +89,7 @@ export function MessageStream({ className }: MessageStreamProps) {
 
           {/* Suggestion questions */}
           <div className="space-y-2">
-            <p className="text-[10px] text-foreground-subtle uppercase tracking-wider">试试问</p>
+            <p className="text-[10px] text-foreground-subtle uppercase tracking-wider">{t('chat.try')}</p>
             <div className="space-y-1.5">
               {suggestionQuestions.slice(0, isMobile ? 3 : 5).map((q, i) => (
                 <button

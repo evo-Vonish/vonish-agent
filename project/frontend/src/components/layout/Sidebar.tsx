@@ -17,6 +17,7 @@ import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
 import { useChatStore } from '@/stores/chatStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
+import { useI18n } from '@/i18n';
 import type { FileNode } from '@/types';
 import { formatTime } from '@/lib/utils';
 import { Tooltip } from '@/components/ui/Tooltip';
@@ -84,6 +85,7 @@ export function Sidebar({ className }: SidebarProps) {
   const { conversations, currentConversationId, selectConversation, deleteConversation, createConversation } =
     useChatStore();
   const { fileTree, loading: wsLoading, loaded: wsLoaded } = useWorkspaceStore();
+  const { t } = useI18n();
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'chats' | 'files'>('chats');
   const [deleteMenuOpen, setDeleteMenuOpen] = useState<string | null>(null);
@@ -173,7 +175,7 @@ export function Sidebar({ className }: SidebarProps) {
                   <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-foreground-subtle" />
                   <input
                     type="text"
-                    placeholder="搜索会话..."
+                    placeholder={t('chat.search')}
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="w-full pl-7 pr-2 py-1.5 text-xs rounded-lg bg-background border border-border text-foreground placeholder:text-foreground-subtle focus:outline-none focus:border-primary/50 transition-colors"
@@ -254,7 +256,7 @@ export function Sidebar({ className }: SidebarProps) {
             )}
           >
             <div className="p-2 border-b border-border">
-              <span className="text-xs font-medium text-foreground">最近会话</span>
+              <span className="text-xs font-medium text-foreground">{t('chat.title')}</span>
             </div>
             <div className="flex-1 overflow-y-auto p-1.5 space-y-0.5">
               {conversations.slice(0, 5).map((conv) => (
@@ -320,7 +322,7 @@ export function Sidebar({ className }: SidebarProps) {
           )}
         >
           <MessageSquare className="w-3.5 h-3.5" />
-          会话
+          {t('nav.conversations')}
         </button>
         <button
           onClick={() => setActiveTab('files')}
@@ -332,7 +334,7 @@ export function Sidebar({ className }: SidebarProps) {
           )}
         >
           <FolderOpen className="w-3.5 h-3.5" />
-          文件
+          {t('nav.files')}
         </button>
       </div>
 
@@ -345,13 +347,13 @@ export function Sidebar({ className }: SidebarProps) {
               className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary/10 text-primary text-xs font-medium hover:bg-primary/20 transition-colors mb-2"
             >
               <MessageSquare className="w-3.5 h-3.5" />
-              新对话
+              {t('chat.new')}
             </button>
             <div className="relative">
               <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-foreground-subtle" />
               <input
                 type="text"
-                placeholder="搜索会话..."
+                placeholder={t('chat.search')}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full pl-7 pr-2 py-1.5 text-xs rounded-lg bg-background border border-border text-foreground placeholder:text-foreground-subtle focus:outline-none focus:border-primary/50 transition-colors"
@@ -398,14 +400,14 @@ export function Sidebar({ className }: SidebarProps) {
       {activeTab === 'files' && (
         <div className="flex-1 overflow-y-auto p-2">
           {!currentConversationId ? (
-            <p className="text-xs text-foreground-subtle p-2">Select a conversation to view workspace files.</p>
+            <p className="text-xs text-foreground-subtle p-2">{t('nav.workspace.empty')}</p>
           ) : wsLoading ? (
             <div className="flex items-center gap-2 p-2 text-xs text-foreground-muted">
               <Loader2 className="w-3 h-3 animate-spin" />
-              Loading files...
+              {t('nav.workspace.loading')}
             </div>
           ) : wsLoaded && fileTree.length === 0 ? (
-            <p className="text-xs text-foreground-subtle p-2">No files in workspace yet.</p>
+            <p className="text-xs text-foreground-subtle p-2">{t('nav.workspace.noFiles')}</p>
           ) : (
             fileTree.map((node) => (
               <FileTreeItem key={node.id} node={node} />

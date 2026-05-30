@@ -1,8 +1,9 @@
 import { useCallback } from 'react';
-import { PanelLeft, Plus, Settings, MessageSquare, X, Minus, Square } from 'lucide-react';
+import { PanelLeft, Plus, Settings, MessageSquare } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
 import { useChatStore } from '@/stores/chatStore';
+import { useI18n } from '@/i18n';
 import { Tooltip } from '@/components/ui/Tooltip';
 
 interface TopBarProps {
@@ -12,6 +13,7 @@ interface TopBarProps {
 export function TopBar({ className }: TopBarProps) {
   const { toggleSidebar, sidebarOpen, isMobile, setMobileSidebarOpen } = useUIStore();
   const { createConversation, currentConversationId, conversations } = useChatStore();
+  const { t } = useI18n();
   const currentConv = conversations.find((c) => c.id === currentConversationId);
 
   const handleNewChat = useCallback(() => {
@@ -28,7 +30,7 @@ export function TopBar({ className }: TopBarProps) {
       {/* Left section */}
       <div className="flex items-center gap-1.5">
         {!isMobile && (
-          <Tooltip content={sidebarOpen ? '收起侧边栏' : '展开侧边栏'}>
+          <Tooltip content={sidebarOpen ? t('nav.sidebar.collapse') : t('nav.sidebar.expand')}>
             <button
               onClick={toggleSidebar}
               className="p-1.5 rounded-md hover:bg-surface-hover text-foreground-muted hover:text-foreground transition-colors"
@@ -38,7 +40,7 @@ export function TopBar({ className }: TopBarProps) {
           </Tooltip>
         )}
         {isMobile && (
-          <Tooltip content="菜单">
+          <Tooltip content={t('statusbar.more')}>
             <button
               onClick={() => setMobileSidebarOpen(true)}
               className="p-1.5 rounded-md hover:bg-surface-hover text-foreground-muted hover:text-foreground transition-colors"
@@ -47,7 +49,7 @@ export function TopBar({ className }: TopBarProps) {
             </button>
           </Tooltip>
         )}
-        <Tooltip content="新对话">
+        <Tooltip content={t('chat.new')}>
           <button
             onClick={handleNewChat}
             className="p-1.5 rounded-md hover:bg-surface-hover text-foreground-muted hover:text-foreground transition-colors"
@@ -57,7 +59,7 @@ export function TopBar({ className }: TopBarProps) {
         </Tooltip>
         <div className="w-px h-4 bg-border mx-1" />
         <span className="text-xs text-foreground font-medium tracking-tight truncate max-w-[200px] sm:max-w-[300px]">
-          {currentConv?.title ?? 'vonish Agent'}
+          {currentConv?.title ?? t('chat.title')}
         </span>
       </div>
 
