@@ -62,9 +62,12 @@ export function ContextButton({ className }: { className?: string }) {
     return () => document.removeEventListener('mousedown', onClick);
   }, [open]);
 
-  // Fetch on open
+  // Fetch on open, track loading
   useEffect(() => {
-    if (open) void fetchContextUsage();
+    if (open) {
+      setLoading(true);
+      fetchContextUsage().finally(() => setLoading(false));
+    }
   }, [open, fetchContextUsage]);
 
   const colorClass = pct < 50 ? 'text-success' : pct < 80 ? 'text-warning' : 'text-error';
@@ -147,19 +150,19 @@ export function ContextButton({ className }: { className?: string }) {
             <div className="grid grid-cols-2 gap-1.5">
               <div className="rounded-md border border-border bg-background px-2 py-1.5">
                 <div className="text-[10px] text-foreground-subtle">{t('context.rounds')}</div>
-                <div className="text-xs font-semibold">{contextUsage?.userMessageCount ?? '—'}</div>
+                <div className="text-xs font-semibold">{loading ? '...' : contextUsage?.userMessageCount ?? 0}</div>
               </div>
               <div className="rounded-md border border-border bg-background px-2 py-1.5">
                 <div className="text-[10px] text-foreground-subtle">{t('context.toolCalls')}</div>
-                <div className="text-xs font-semibold">{contextUsage?.toolCallCount ?? '—'}</div>
+                <div className="text-xs font-semibold">{loading ? '...' : contextUsage?.toolCallCount ?? 0}</div>
               </div>
               <div className="rounded-md border border-border bg-background px-2 py-1.5">
                 <div className="text-[10px] text-foreground-subtle">{t('context.files')}</div>
-                <div className="text-xs font-semibold">{contextUsage?.workspaceFileCount ?? '—'}</div>
+                <div className="text-xs font-semibold">{loading ? '...' : contextUsage?.workspaceFileCount ?? 0}</div>
               </div>
               <div className="rounded-md border border-border bg-background px-2 py-1.5">
                 <div className="text-[10px] text-foreground-subtle">{t('context.memory')}</div>
-                <div className="text-xs font-semibold">{contextUsage?.memoryItemCount ?? '—'}</div>
+                <div className="text-xs font-semibold">{loading ? '...' : contextUsage?.memoryItemCount ?? 0}</div>
               </div>
             </div>
 
