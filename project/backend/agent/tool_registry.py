@@ -241,25 +241,6 @@ def register_default_tools() -> None:
     """Register the default set of tools from skill schemas."""
     registry = ToolRegistry()
 
-    # Read File
-    registry.register(
-        ToolDefinition(
-            name="read_file",
-            description="Read the contents of a file in the workspace.",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Relative path to the file in the workspace",
-                    },
-                },
-                "required": ["path"],
-            },
-            category="file_ops",
-        )
-    )
-
     # Edit File
     registry.register(
         ToolDefinition(

@@ -20,27 +20,6 @@ interface ToolState {
 const mockTools: ToolDefinition[] = [
   // File Operations
   {
-    name: 'read_file',
-    description: 'Read files from workspace',
-    category: 'file_ops',
-    capabilities: ['read_only'],
-    approvalLevel: 'auto',
-    isEnabled: true,
-    isReadOnly: true,
-    supportsParallel: true,
-    schema: {
-      type: 'object',
-      properties: {
-        file_path: { type: 'string', description: 'Path to the file to read' },
-        offset: { type: 'number', description: 'Start reading from this line offset' },
-        limit: { type: 'number', description: 'Maximum number of lines to read' },
-      },
-      required: ['file_path'],
-    },
-    lastUsed: '2025-05-28T10:30:00Z',
-    useCount: 1243,
-  },
-  {
     name: 'write_to_file',
     description: 'Create or overwrite files in the workspace',
     category: 'file_ops',

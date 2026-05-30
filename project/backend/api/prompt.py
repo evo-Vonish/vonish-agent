@@ -16,7 +16,6 @@ router = APIRouter(prefix="/api")
 # ── In-memory tool config (migrate to DB later) ──────────────────────────
 _tool_configs: dict[str, bool] = {
     # File Ops
-    "read_file": True,
     "file_read": True,
     "edit_file": True,
     "write_to_file": True,
