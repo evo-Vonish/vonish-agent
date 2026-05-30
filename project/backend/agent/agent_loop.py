@@ -216,10 +216,16 @@ class AgentLoop:
                 # Collect tool_calls from native function calling
                 native_tool_calls: list[dict] = []
 
+                # ── Inject todo reminder ──────────────────────────────
+                todo_reminder = self._get_todo_reminder(conversation_id)
+                effective_prompt = context.system_prompt
+                if todo_reminder:
+                    effective_prompt = (effective_prompt or "") + todo_reminder
+
                 # Stream from model — pass tools natively, NOT in prompt text
                 async for chunk in adapter.stream_chat(
                     messages=context.messages,
-                    system_prompt=context.system_prompt,
+                    system_prompt=effective_prompt,
                     tools=context.tools,
                     enable_thinking=(
                         self.config.enable_thinking
@@ -619,6 +625,55 @@ class AgentLoop:
                     )
                 )
         return history
+
+    def _get_todo_reminder(self, conversation_id: str) -> str:
+        """Weak reminder: inject current todo state from workspace/.agent/todo.json."""
+        import json as _json
+        from pathlib import Path as _Path
+        from core.config import settings
+
+        todo_path = _Path(settings.workspace_root) / conversation_id / ".agent" / "todo.json"
+        if not todo_path.exists():
+            return ""
+
+        try:
+            data = _json.loads(todo_path.read_text(encoding="utf-8"))
+        except Exception:
+            return ""
+
+        items = data.get("items", [])
+        if not items:
+            return ""
+
+        # Count statuses
+        counts = {}
+        for it in items:
+            s = it.get("status", "todo")
+            counts[s] = counts.get(s, 0) + 1
+
+        pending = counts.get("todo", 0) + counts.get("doing", 0)
+        done = counts.get("done", 0)
+        blocked = counts.get("blocked", 0)
+
+        lines = ["\n[Current Todo Status]"]
+        if done > 0:
+            lines.append(f"✅ {done} done")
+        if pending > 0:
+            lines.append(f"⏳ {pending} pending (todo/doing)")
+        if blocked > 0:
+            lines.append(f"🚫 {blocked} blocked")
+
+        lines.append("Items:")
+        for it in items[:8]:
+            icon = {"done": "✅", "doing": "➡️", "blocked": "🚫"}.get(it["status"], "⬜")
+            lines.append(f"  {icon} [{it['status']}] {it['title']}")
+
+        if pending == 0 and done > 0:
+            lines.append("\nAll items are done. If you are about to give a final summary, you may.")
+        elif pending > 0:
+            lines.append(f"\n{pending} item(s) still pending. Update todo status as you progress.")
+
+        return "\n".join(lines) + "\n"
 
     def _default_system_prompt(self) -> str:
         """Get the default system prompt.

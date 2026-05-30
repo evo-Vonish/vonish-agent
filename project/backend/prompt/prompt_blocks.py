@@ -51,6 +51,23 @@ BLOCK_TYPE_PRIORITY: dict[str, int] = {
 
 # ── Fixed Blocks (always enabled) ────────────────────────────────────────
 
+TODO_RULES = PromptBlock(
+    id="todo_rules",
+    type="behavior_rules",
+    priority=BLOCK_TYPE_PRIORITY["behavior_rules"],
+    enabled=True,
+    source="system",
+    content=(
+        "Todo rules (critical):\n"
+        "- For complex multi-step tasks, call set_todo_list(mode='replace') at the start.\n"
+        "- Update todo items as you complete each step: set_todo_list(mode='update').\n"
+        "- Mark the currently-in-progress item as 'doing', completed ones as 'done'.\n"
+        "- Before giving a final summary, ensure ALL todo items are 'done' or 'cancelled'.\n"
+        "- NEVER announce a task as finished if its todo item is still 'todo' or 'doing'.\n"
+        "- If blocked by missing info, mark item 'blocked' and call ask_user_question.\n"
+    ),
+)
+
 FIXED_HEADER = PromptBlock(
     id="fixed_header",
     type="fixed_header",
