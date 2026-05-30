@@ -302,6 +302,9 @@ class ToolExecutor:
             "apply_patch": self._handle_apply_patch,
             "list_directory": self._handle_list_directory,
             "snapshot": self._handle_snapshot,
+            "set_todo_list": self._handle_set_todo_list,
+            "ask_user_question": self._handle_ask_user_question,
+            "request_approval": self._handle_request_approval,
         }
         return default_handlers.get(tool_name)
 
@@ -773,6 +776,62 @@ class ToolExecutor:
             "total_size": total_size,
             "files": files[:200],
         }
+
+    # ── Set Todo List ─────────────────────────────────────────────────
+
+    async def _handle_set_todo_list(
+        self,
+        mode: str,
+        conversation_id: str = "",
+        items: list[dict] | None = None,
+        **_: Any,
+    ) -> dict[str, Any]:
+        from agent.interaction_tools import handle_set_todo_list
+        return await handle_set_todo_list(mode=mode, conversation_id=conversation_id, items=items or [])
+
+    # ── Ask User Question ─────────────────────────────────────────────
+
+    async def _handle_ask_user_question(
+        self,
+        conversation_id: str = "",
+        question: str = "",
+        description: str = "",
+        options: list[dict] | None = None,
+        allow_custom_response: bool = True,
+        custom_placeholder: str = "",
+        **_: Any,
+    ) -> dict[str, Any]:
+        from agent.interaction_tools import handle_ask_user_question
+        return await handle_ask_user_question(
+            conversation_id=conversation_id,
+            question=question,
+            description=description,
+            options=options or [],
+            allow_custom_response=allow_custom_response,
+            custom_placeholder=custom_placeholder,
+        )
+
+    # ── Request Approval ──────────────────────────────────────────────
+
+    async def _handle_request_approval(
+        self,
+        conversation_id: str = "",
+        title: str = "",
+        description: str = "",
+        risk_level: str = "medium",
+        plan: list[dict] | None = None,
+        allow_custom_response: bool = True,
+        **_: Any,
+    ) -> dict[str, Any]:
+        from agent.interaction_tools import handle_request_approval
+        return await handle_request_approval(
+            conversation_id=conversation_id,
+            title=title,
+            description=description,
+            risk_level=risk_level,
+            plan=plan or [],
+            allow_custom_response=allow_custom_response,
+        )
 
 
 # ---------------------------------------------------------------------------

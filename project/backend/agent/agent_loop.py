@@ -74,6 +74,44 @@ class AgentLoop:
     def __init__(self, config: AgentLoopConfig | None = None) -> None:
         self.config = config or AgentLoopConfig()
         self._active_loops: dict[str, asyncio.Event] = {}
+        self._pause_events: dict[str, asyncio.Event] = {}
+        self._interactions: dict[str, dict[str, Any]] = {}
+
+    # ── Human Interaction State Management ──────────────────────
+
+    def set_waiting(self, conversation_id: str, interaction: dict) -> None:
+        """Set agent into waiting_user state with an interaction payload."""
+        self._interactions[conversation_id] = interaction
+        pe = asyncio.Event()
+        self._pause_events[conversation_id] = pe
+        logger.info(f"Agent waiting for user response: {conversation_id}")
+
+    def is_waiting(self, conversation_id: str) -> bool:
+        return conversation_id in self._pause_events
+
+    def get_interaction(self, conversation_id: str) -> dict | None:
+        return self._interactions.get(conversation_id)
+
+    async def resume_from_interaction(self, conversation_id: str, response: dict) -> None:
+        """Resume agent loop with user response."""
+        self._interactions[conversation_id] = {
+            **(self._interactions.get(conversation_id) or {}),
+            "response": response,
+        }
+        pe = self._pause_events.pop(conversation_id, None)
+        if pe:
+            pe.set()
+            logger.info(f"Agent resumed: {conversation_id}")
+
+    def cancel_interaction(self, conversation_id: str) -> None:
+        """Cancel waiting and abort agent loop."""
+        pe = self._pause_events.pop(conversation_id, None)
+        if pe:
+            pe.set()
+        if conversation_id in self._active_loops:
+            self._active_loops[conversation_id].set()
+        self._interactions.pop(conversation_id, None)
+        logger.info(f"Agent interaction cancelled: {conversation_id}")
 
     async def run(
         self,
@@ -126,6 +164,46 @@ class AgentLoop:
                 if stop_event.is_set():
                     yield sse_event("aborted", {"reason": "user_request"})
                     return
+
+                # ── Check for human interaction pause ─────────────────
+                if self.is_waiting(conversation_id):
+                    # Yield interaction card to frontend
+                    interaction = self.get_interaction(conversation_id) or {}
+                    yield sse_event("interaction_required", {
+                        "interaction_id": interaction.get("id", ""),
+                        "type": interaction.get("type", ""),
+                        "title": interaction.get("title", ""),
+                        "description": interaction.get("description", ""),
+                        "options": interaction.get("options", []),
+                        "payload": interaction.get("payload"),
+                    })
+                    yield sse_event("agent_paused", {
+                        "reason": interaction.get("type", "interaction"),
+                    })
+                    # Wait for resume or cancel
+                    pe = self._pause_events.get(conversation_id)
+                    if pe:
+                        await pe.wait()
+                    # Check if cancelled
+                    if stop_event.is_set():
+                        yield sse_event("aborted", {"reason": "interaction_cancelled"})
+                        return
+                    # Get user response
+                    interaction = self.get_interaction(conversation_id) or {}
+                    response = interaction.get("response", {})
+                    yield sse_event("agent_resumed", {
+                        "choice": response.get("choice", ""),
+                        "message": response.get("message", ""),
+                    })
+                    # Inject response as context for the next round
+                    resp_text = response.get("choice", "custom")
+                    if response.get("message"):
+                        resp_text += f": {response['message']}"
+                    user_resp_msg = MessageBlock(
+                        role="user",
+                        content=f"[User Response — {interaction.get('type', 'interaction')}]: {resp_text}",
+                    )
+                    context.messages.append(user_resp_msg)
 
                 logger.debug(
                     f"Agent loop round {round_num + 1}/{self.config.max_rounds}",
@@ -225,6 +303,11 @@ class AgentLoop:
                         conversation_id, context, native_tool_calls
                     )
 
+                    # 2b. Persist tool calls to database
+                    await self._persist_tool_calls(
+                        conversation_id, native_tool_calls, tool_results
+                    )
+
                     # 3. Send results to frontend
                     for result in tool_results:
                         yield sse_event(
@@ -245,11 +328,18 @@ class AgentLoop:
                             },
                         )
 
-                    # 4. Feed results back as native tool-response messages
+                    # 4. Check for interaction-required tools (ask_user_question, request_approval)
+                    for result in tool_results:
+                        if isinstance(result.result, dict) and result.result.get("interaction_required"):
+                            interaction = result.result.get("interaction", {})
+                            self.set_waiting(conversation_id, interaction)
+                            break
+
+                    # 5. Feed results back as native tool-response messages
                     context = await self._update_context_with_native_results(
                         context, native_tool_calls, tool_results
                     )
-                    # Continue to next round — model will synthesize answer
+                    # Continue to next round — model will synthesize answer OR pause for user
                     continue
 
                 else:
@@ -398,6 +488,50 @@ class AgentLoop:
             r.tool_call_id = r.call_id
 
         return results
+
+    async def _persist_tool_calls(
+        self,
+        conversation_id: str,
+        native_tool_calls: list[dict],
+        tool_results: list[ToolCallResult],
+    ) -> None:
+        """Save tool call records to the database.
+
+        Args:
+            conversation_id: Current conversation ID.
+            native_tool_calls: Original tool call definitions from the model.
+            tool_results: Executed results.
+        """
+        import uuid as _uuid
+        from datetime import datetime, timezone
+        from db.models import ToolCall as ToolCallModel
+        from db.session import get_session_maker
+
+        try:
+            conv_uuid = _uuid.UUID(conversation_id)
+        except ValueError:
+            return
+
+        session_maker = get_session_maker()
+        async with session_maker() as db:
+            for tc, result in zip(native_tool_calls, tool_results):
+                fn = tc.get("function", {})
+                tool_name = fn.get("name", result.tool_name)
+                arguments = result.arguments or {}
+                now = datetime.now(timezone.utc)
+
+                tool_call = ToolCallModel(
+                    conversation_id=conv_uuid,
+                    tool_name=tool_name,
+                    arguments=arguments,
+                    status="completed" if result.success else "failed",
+                    result=result.result if result.success else {"error": result.error_message},
+                    started_at=now,
+                    completed_at=now,
+                )
+                db.add(tool_call)
+
+            await db.commit()
 
     async def _update_context_with_native_results(
         self,

@@ -591,6 +591,99 @@ def register_default_tools() -> None:
         )
     )
 
+    # Todo List
+    registry.register(
+        ToolDefinition(
+            name="set_todo_list",
+            description="Create, update, or read the current task todo list. Use for complex multi-step tasks.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "mode": {"type": "string", "enum": ["replace", "update", "read"]},
+                    "items": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "string"},
+                                "title": {"type": "string"},
+                                "status": {"type": "string", "enum": ["todo", "doing", "done", "blocked", "cancelled"]},
+                                "note": {"type": "string"},
+                            },
+                            "required": ["id", "title", "status"],
+                        },
+                    },
+                },
+                "required": ["mode"],
+            },
+            category="system",
+        )
+    )
+
+    # Ask User Question
+    registry.register(
+        ToolDefinition(
+            name="ask_user_question",
+            description="Ask the user a clarification question and pause until they respond. Use when info is insufficient.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string"},
+                    "description": {"type": "string"},
+                    "options": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "string"},
+                                "label": {"type": "string"},
+                                "description": {"type": "string"},
+                            },
+                            "required": ["id", "label"],
+                        },
+                    },
+                    "allow_custom_response": {"type": "boolean", "default": True},
+                    "custom_placeholder": {"type": "string", "default": "Custom response…"},
+                },
+                "required": ["question", "options"],
+            },
+            category="system",
+        )
+    )
+
+    # Request Approval
+    registry.register(
+        ToolDefinition(
+            name="request_approval",
+            description="Request user approval before executing a risky plan. Agent pauses until the user responds.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "description": {"type": "string"},
+                    "risk_level": {"type": "string", "enum": ["low", "medium", "high"], "default": "medium"},
+                    "plan": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "string"},
+                                "title": {"type": "string"},
+                                "description": {"type": "string"},
+                                "risk": {"type": "string", "enum": ["low", "medium", "high"]},
+                            },
+                            "required": ["id", "title"],
+                        },
+                    },
+                    "allow_custom_response": {"type": "boolean", "default": True},
+                },
+                "required": ["title", "plan"],
+            },
+            category="system",
+            requires_confirmation=False,
+        )
+    )
+
     logger.info(f"Registered {len(registry.list_all())} default tools")
 
 

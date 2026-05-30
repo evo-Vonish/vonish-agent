@@ -1,5 +1,13 @@
 import { create } from 'zustand';
-import type { Message, Conversation, Model, ContextProfile, ToolCall } from '@/types';
+import type {
+  Message,
+  Conversation,
+  Model,
+  ContextProfile,
+  ContextUsage,
+  ToolCall,
+  MessageSegment,
+} from '@/types';
 import { mockContextProfile, contextProfiles } from '@/services/mockData';
 import {
   createConversation as apiCreateConversation,
@@ -9,9 +17,13 @@ import {
   streamChat,
   stopChat,
   getConversationMessages,
+  summarizeConversationTitle,
+  summarizeThinking,
+  getContextUsage,
 } from '@/services/api';
 import { generateId } from '@/lib/utils';
 import { useWorkspaceStore } from './workspaceStore';
+import { useToolStore } from './useToolStore';
 
 interface ChatState {
   conversations: Conversation[];
@@ -21,6 +33,7 @@ interface ChatState {
   selectedModelId: string;
   contextProfile: ContextProfile;
   availableProfiles: ContextProfile[];
+  contextUsage: ContextUsage | null;
   isStreaming: boolean;
   inputText: string;
   attachments: { id: string; file: File; uploading: boolean }[];
@@ -35,12 +48,14 @@ interface ChatState {
   updateMessage: (id: string, partial: Partial<Message>) => void;
   sendMessage: (content: string) => Promise<void>;
   stopGeneration: () => void;
+  respondToInteraction: (choice: string, message?: string) => Promise<void>;
   selectConversation: (id: string) => Promise<void>;
   createConversation: (title?: string) => Promise<string>;
   deleteConversation: (id: string) => Promise<void>;
   setSelectedModel: (id: string) => void;
   setContextProfile: (profile: ContextProfile) => void;
   switchContextProfile: (profileId: string) => void;
+  fetchContextUsage: () => Promise<void>;
   setIsStreaming: (v: boolean) => void;
   addAttachment: (file: File) => void;
   removeAttachment: (id: string) => void;
@@ -93,6 +108,23 @@ function firstLineTitle(content: string): string {
   return compact.length > 36 ? `${compact.slice(0, 36)}...` : compact || 'New chat';
 }
 
+function compactPhrase(content: string): string {
+  const compact = content.replace(/\s+/g, ' ').trim();
+  if (!compact) return '思考过程';
+  const sentence = compact.split(/[。！？.!?]/)[0]?.trim() || compact;
+  return sentence.length > 18 ? `${sentence.slice(0, 18)}...` : sentence;
+}
+
+function updateSegment(
+  segments: MessageSegment[] | undefined,
+  segmentId: string,
+  updater: (segment: MessageSegment) => MessageSegment,
+): MessageSegment[] {
+  return (segments ?? []).map((segment) =>
+    segment.id === segmentId ? updater(segment) : segment,
+  );
+}
+
 export const useChatStore = create<ChatState>((set, get) => ({
   conversations: [],
   currentConversationId: null,
@@ -101,6 +133,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   selectedModelId: fallbackModels[0].id,
   contextProfile: mockContextProfile,
   availableProfiles: contextProfiles,
+  contextUsage: null,
   isStreaming: false,
   inputText: '',
   attachments: [],
@@ -139,6 +172,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // Load workspace for initial conversation
       const cid = get().currentConversationId;
       if (cid) useWorkspaceStore.getState().loadWorkspace(cid);
+      // Load tools from backend
+      void useToolStore.getState().loadToolsFromBackend();
     } catch (error) {
       set({
         initialized: true,
@@ -207,57 +242,111 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const abort = new AbortController();
     set({ isStreaming: true, apiError: null, _abortController: abort });
 
-    // Single assistant message accumulates all rounds (think + text + tools).
     const currentMsgId = assistantMsg.id;
+    const selectedModelForRequest = get().selectedModelId;
+    let activeThinkingSegmentId: string | null = null;
+    let activeTextSegmentId: string | null = null;
+
+    const appendSegment = (segment: MessageSegment) => {
+      const current = get().messages.find((m) => m.id === currentMsgId);
+      get().updateMessage(currentMsgId, {
+        segments: [...(current?.segments ?? []), segment],
+      });
+    };
+
+    const updateSegments = (
+      segmentId: string,
+      updater: (segment: MessageSegment) => MessageSegment,
+    ) => {
+      const current = get().messages.find((m) => m.id === currentMsgId);
+      get().updateMessage(currentMsgId, {
+        segments: updateSegment(current?.segments, segmentId, updater),
+      });
+    };
 
     try {
       await streamChat(
         conversationId,
         content,
-        get().selectedModelId,
+        selectedModelForRequest,
         ({ event, data }) => {
           if (abort.signal.aborted) return;
           if (event === 'thinking_start') {
-            // Push previous block, start fresh one (all in the same bubble)
-            const current = get().messages.find((m) => m.id === currentMsgId);
-            const curContent = current?.thinkingContent || '';
-            const blocks = [...(current?.thinkingBlocks || [])];
-            if (curContent.trim()) {
-              blocks.push(curContent);
-            }
-            get().updateMessage(currentMsgId, {
-              thinkingContent: '',
-              thinkingBlocks: blocks,
+            activeThinkingSegmentId = generateId();
+            activeTextSegmentId = null;
+            appendSegment({
+              id: activeThinkingSegmentId,
+              type: 'thinking',
+              content: '',
+              summary: '思考中...',
+              status: 'streaming',
             });
             return;
           }
 
           if (event === 'thinking_delta') {
             const delta = String(data.content ?? '');
-            const current = get().messages.find((m) => m.id === currentMsgId);
-            get().updateMessage(currentMsgId, {
-              thinkingContent: `${current?.thinkingContent ?? ''}${delta}`,
+            if (!activeThinkingSegmentId) {
+              activeThinkingSegmentId = generateId();
+              appendSegment({
+                id: activeThinkingSegmentId,
+                type: 'thinking',
+                content: '',
+                summary: '思考中...',
+                status: 'streaming',
+              });
+            }
+            updateSegments(activeThinkingSegmentId, (segment) => {
+              if (segment.type !== 'thinking') return segment;
+              return { ...segment, content: `${segment.content}${delta}` };
             });
             return;
           }
 
           if (event === 'thinking_end') {
             const current = get().messages.find((m) => m.id === currentMsgId);
-            const curContent = current?.thinkingContent || '';
-            const blocks = [...(current?.thinkingBlocks || [])];
-            if (curContent.trim()) {
-              blocks.push(curContent);
+            const finishedId = activeThinkingSegmentId;
+            const finished = current?.segments?.find(
+              (segment) => segment.id === finishedId && segment.type === 'thinking',
+            );
+            if (finishedId && finished?.type === 'thinking') {
+              const rawThinking = finished.content.trim();
+              const fallbackSummary = compactPhrase(rawThinking);
+              updateSegments(finishedId, (segment) =>
+                segment.type === 'thinking'
+                  ? { ...segment, summary: fallbackSummary, status: 'complete' }
+                  : segment,
+              );
+              if (rawThinking) {
+                void summarizeThinking(rawThinking.slice(0, 4000), selectedModelForRequest)
+                  .then((summary) => {
+                    if (!summary.trim()) return;
+                    updateSegments(finishedId, (segment) =>
+                      segment.type === 'thinking'
+                        ? { ...segment, summary: summary.trim().slice(0, 32) }
+                        : segment,
+                    );
+                  })
+                  .catch(() => {});
+              }
             }
-            get().updateMessage(currentMsgId, {
-              thinkingContent: '',
-              thinkingBlocks: blocks,
-            });
+            activeThinkingSegmentId = null;
+            activeTextSegmentId = null;
             return;
           }
 
           if (event === 'text_delta' || event === 'markdown_delta') {
             const delta = String(data.content ?? '');
             const current = get().messages.find((m) => m.id === currentMsgId);
+            if (!activeTextSegmentId) {
+              activeTextSegmentId = generateId();
+              appendSegment({ id: activeTextSegmentId, type: 'text', content: '' });
+            }
+            updateSegments(activeTextSegmentId, (segment) =>
+              segment.type === 'text'
+                ? { ...segment, content: `${segment.content}${delta}` }
+                : segment,
+            );
             get().updateMessage(currentMsgId, {
               content: `${current?.content ?? ''}${delta}`,
             });
@@ -278,12 +367,64 @@ export const useChatStore = create<ChatState>((set, get) => ({
               status: 'running',
               startTime: Date.now(),
             };
+            activeTextSegmentId = null;
+            activeThinkingSegmentId = null;
             const current = get().messages.find((m) => m.id === currentMsgId);
             const existing = current?.toolCalls ?? [];
             get().updateMessage(currentMsgId, {
               type: 'tool_call',
               toolCalls: [...existing, newCall],
+              segments: [
+                ...(current?.segments ?? []),
+                { id: `tool-${callId || generateId()}`, type: 'tool', tool: newCall },
+              ],
             });
+            return;
+          }
+
+          if (event === 'interaction_required') {
+            const payload = data as any;
+            const current = get().messages.find((m) => m.id === currentMsgId);
+            get().updateMessage(currentMsgId, {
+              type: 'interaction',
+              interaction: {
+                interaction_id: String(payload.interaction_id ?? ''),
+                type: String(payload.type ?? '') as 'ask_user_question' | 'request_approval',
+                title: String(payload.title ?? ''),
+                description: payload.description ? String(payload.description) : undefined,
+                options: Array.isArray(payload.options) ? payload.options : [],
+                plan: Array.isArray(payload.payload?.plan) ? payload.payload.plan : undefined,
+                allow_custom_response: payload.payload?.allow_custom_response ?? true,
+                risk_level: payload.payload?.risk_level ?? 'medium',
+              },
+            });
+            return;
+          }
+
+          if (event === 'agent_paused') {
+            // Mark the message as waiting for user
+            const current = get().messages.find((m) => m.id === currentMsgId);
+            if (current?.interaction) {
+              get().updateMessage(currentMsgId, {
+                interaction: { ...current.interaction, resolved: false },
+              });
+            }
+            return;
+          }
+
+          if (event === 'agent_resumed') {
+            const choice = String(data.choice ?? '');
+            const message = data.message ? String(data.message) : undefined;
+            const current = get().messages.find((m) => m.id === currentMsgId);
+            if (current?.interaction) {
+              get().updateMessage(currentMsgId, {
+                interaction: {
+                  ...current.interaction,
+                  resolved: true,
+                  response: { choice, message },
+                },
+              });
+            }
             return;
           }
 
@@ -305,27 +446,77 @@ export const useChatStore = create<ChatState>((set, get) => ({
                   }
                 : tc,
             );
-            get().updateMessage(currentMsgId, { toolCalls });
+            const updatedTool = toolCalls.find((tc) => tc.id === callId);
+
+            // Detect todo list updates from tool results
+            const updates: Partial<Message> = {
+              toolCalls,
+              segments: (current?.segments ?? []).map((segment) =>
+                segment.type === 'tool' && segment.tool.id === callId && updatedTool
+                  ? { ...segment, tool: updatedTool }
+                  : segment,
+              ),
+            };
+
+            if (result && typeof result === 'object' && (result as any).items) {
+              const todoResult = result as { items: any[]; count: number };
+              updates.todo = {
+                items: todoResult.items.map((it: any) => ({
+                  id: it.id || '',
+                  title: it.title || '',
+                  status: (it.status || 'todo') as any,
+                  note: it.note,
+                })),
+                count: todoResult.count,
+              };
+            }
+
+            get().updateMessage(currentMsgId, updates);
             return;
           }
 
           if (event === 'error') {
             const detail = String(data.detail ?? 'Unknown API error');
+            const current = get().messages.find((m) => m.id === currentMsgId);
             get().updateMessage(currentMsgId, {
               content: detail,
               type: 'error',
               status: 'error',
+              segments: [
+                ...(current?.segments ?? []),
+                { id: generateId(), type: 'text', content: detail },
+              ],
             });
             set({ apiError: detail, isStreaming: false });
             return;
           }
 
           if (event === 'aborted') {
+            const current = get().messages.find((m) => m.id === currentMsgId);
             get().updateMessage(currentMsgId, {
               status: 'error',
               content: 'Generation stopped.',
+              segments: [
+                ...(current?.segments ?? []),
+                { id: generateId(), type: 'text', content: 'Generation stopped.' },
+              ],
             });
             set({ isStreaming: false });
+            return;
+          }
+
+          if (event === 'context_usage') {
+            const inputTokens = Number(data.input_tokens ?? 0);
+            const outputTokens = Number(data.output_tokens ?? 0);
+            set((state) => {
+              if (!state.contextUsage) return state;
+              return {
+                contextUsage: {
+                  ...state.contextUsage,
+                  totalTokens: inputTokens + outputTokens,
+                },
+              };
+            });
             return;
           }
 
@@ -341,6 +532,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (latest?.status === 'streaming') {
         get().updateMessage(currentMsgId, { status: 'complete' });
       }
+      // Refresh context usage after streaming completes
+      void get().fetchContextUsage();
+      const finalAssistant = get().messages.find((m) => m.id === currentMsgId);
+      const turnCount = get().messages.filter((message) => message.role === 'user').length;
+      if (finalAssistant?.status === 'complete' && turnCount > 0 && turnCount <= 2) {
+        void summarizeConversationTitle(conversationId, selectedModelForRequest)
+          .then((title) => {
+            if (!title.trim()) return;
+            set((state) => ({
+              conversations: state.conversations.map((conversation) =>
+                conversation.id === conversationId
+                  ? { ...conversation, title: title.trim(), updatedAt: Date.now() }
+                  : conversation,
+              ),
+            }));
+          })
+          .catch(() => {});
+      }
     } catch (error) {
       // AbortError is expected on user-triggered stop — not a real error
       if (error instanceof DOMException && error.name === 'AbortError') {
@@ -350,10 +559,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
         });
       } else {
         const detail = error instanceof Error ? error.message : String(error);
+        const current = get().messages.find((m) => m.id === currentMsgId);
         get().updateMessage(currentMsgId, {
           content: detail,
           type: 'error',
           status: 'error',
+          segments: [
+            ...(current?.segments ?? []),
+            { id: generateId(), type: 'text', content: detail },
+          ],
         });
         set({ apiError: detail });
       }
@@ -368,11 +582,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
       ctrl.abort();
       set({ _abortController: null });
     }
-    // Also notify backend
     const conversationId = get().currentConversationId;
     if (conversationId) {
       stopChat(conversationId).catch(() => {});
     }
+  },
+
+  respondToInteraction: async (choice, message) => {
+    const conversationId = get().currentConversationId;
+    const lastMsg = get().messages.filter(m => m.role === 'assistant' && m.interaction).pop();
+    if (!conversationId || !lastMsg?.interaction) return;
+
+    const interactionId = lastMsg.interaction.interaction_id;
+    await fetch(`/api/agent-runs/${conversationId}/interactions/${interactionId}/resume`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ choice, message: message || null }),
+    });
   },
 
   selectConversation: async (id) => {
@@ -383,15 +609,38 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     try {
       const result = await getConversationMessages(id);
-      const messages: Message[] = result.messages.map((m) => ({
-        id: generateId(),
-        role: m.role as 'user' | 'assistant',
-        content: m.content,
-        thinkingContent: m.thinking ?? undefined,
-        type: m.role === 'user' ? 'text' : 'text',
-        timestamp: Date.parse(m.timestamp) || Date.now(),
-        status: 'complete' as const,
-      }));
+      const messages: Message[] = result.messages.map((m) => {
+        const role = m.role as 'user' | 'assistant';
+        const segments: MessageSegment[] =
+          role === 'assistant'
+            ? [
+                ...(m.thinking
+                  ? [
+                      {
+                        id: generateId(),
+                        type: 'thinking' as const,
+                        content: m.thinking,
+                        summary: compactPhrase(m.thinking),
+                        status: 'complete' as const,
+                      },
+                    ]
+                  : []),
+                ...(m.content
+                  ? [{ id: generateId(), type: 'text' as const, content: m.content }]
+                  : []),
+              ]
+            : [];
+        return {
+          id: generateId(),
+          role,
+          content: m.content,
+          thinkingContent: m.thinking ?? undefined,
+          segments: segments.length ? segments : undefined,
+          type: 'text',
+          timestamp: Date.parse(m.timestamp) || Date.now(),
+          status: 'complete' as const,
+        };
+      });
       set({ messages });
     } catch {
       set({ messages: [] });
@@ -399,6 +648,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     // Load workspace file tree for this conversation
     useWorkspaceStore.getState().loadWorkspace(id);
+    // Refresh context usage for the selected conversation
+    void get().fetchContextUsage();
   },
 
   createConversation: async (title = 'New chat') => {
@@ -440,6 +691,38 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const profile = get().availableProfiles.find((p) => p.id === profileId);
     if (profile) {
       set({ contextProfile: profile });
+    }
+  },
+
+  fetchContextUsage: async () => {
+    const conversationId = get().currentConversationId;
+    if (!conversationId) return;
+    try {
+      const modelId = get().selectedModelId;
+      const profile = get().contextProfile.id;
+      const data = await getContextUsage(conversationId, modelId, profile);
+      const usage: ContextUsage = {
+        conversationId: data.conversation_id,
+        totalTokens: data.total_tokens,
+        maxTokens: data.max_tokens,
+        availableBudget: data.available_budget,
+        outputReserved: data.output_reserved,
+        safetyMargin: data.safety_margin,
+        profile: data.profile,
+        model: data.model,
+        usageRatio: data.usage_ratio,
+        compressionLevel: data.compression_level,
+        budgetHealthy: data.budget_healthy,
+        components: data.components,
+        messageCount: data.message_count,
+        userMessageCount: data.user_message_count,
+        toolCallCount: data.tool_call_count,
+        workspaceFileCount: data.workspace_file_count,
+        memoryItemCount: data.memory_item_count,
+      };
+      set({ contextUsage: usage });
+    } catch {
+      // Silently fail — context usage is non-critical UI
     }
   },
 

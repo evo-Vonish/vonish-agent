@@ -222,3 +222,38 @@ async def chat_stop(
         "conversation_id": conversation_id,
         "reason": request.reason,
     }
+
+
+# ── Interaction Resume ────────────────────────────────────────────────────
+
+class ResumeRequest(BaseModel):
+    choice: str = Field(..., description="User's choice: approve / reject_revise / reject_exit / custom / option id")
+    message: str | None = Field(default=None, description="Optional custom response text")
+
+
+@router.post("/agent-runs/{conversation_id}/interactions/{interaction_id}/resume")
+async def resume_interaction(
+    conversation_id: str,
+    interaction_id: str,
+    request: ResumeRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Resume an agent run that is waiting for user interaction."""
+    agent_loop = get_agent_loop()
+
+    if not agent_loop.is_waiting(conversation_id):
+        return {"status": "not_waiting", "conversation_id": conversation_id}
+
+    # Handle reject_exit → cancel the run
+    if request.choice == "reject_exit":
+        agent_loop.cancel_interaction(conversation_id)
+        logger.info(f"Interaction {interaction_id} cancelled by user (reject_exit)")
+        return {"status": "cancelled", "conversation_id": conversation_id}
+
+    await agent_loop.resume_from_interaction(conversation_id, {
+        "choice": request.choice,
+        "message": request.message,
+    })
+    logger.info(f"Interaction {interaction_id} resumed with choice: {request.choice}")
+    return {"status": "resumed", "conversation_id": conversation_id}

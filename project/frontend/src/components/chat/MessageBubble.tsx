@@ -2,9 +2,12 @@ import { Bot, Sparkles, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Message, MessageSegment } from '@/types';
 import { useI18n } from '@/i18n';
+import { useChatStore } from '@/stores/chatStore';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { ThinkingCard } from './ThinkingCard';
 import { ToolCard } from './ToolCard';
+import { TodoCard } from './TodoCard';
+import { InteractionCard } from './InteractionCard';
 
 interface MessageBubbleProps {
   message: Message;
@@ -44,6 +47,8 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
   const hasContent = message.content && message.content.length > 0;
   const hasSegments = Boolean(message.segments?.length);
   const { t } = useI18n();
+  const respondToInteraction = useChatStore((s) => s.respondToInteraction);
+  const conversationId = useChatStore((s) => s.currentConversationId);
 
   return (
     <div
@@ -104,6 +109,31 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
             )}
 
             {hasContent && <AssistantTextBlock content={message.content} />}
+
+            {/* Todo Card */}
+            {message.todo && message.todo.items && message.todo.items.length > 0 && (
+              <TodoCard items={message.todo.items as any} count={message.todo.count} />
+            )}
+
+            {/* Interaction Card */}
+            {message.interaction && message.interaction.interaction_id && (
+              <InteractionCard
+                payload={{
+                  interaction_id: message.interaction.interaction_id,
+                  type: message.interaction.type,
+                  title: message.interaction.title,
+                  description: message.interaction.description,
+                  options: message.interaction.options,
+                  allow_custom_response: message.interaction.allow_custom_response,
+                  risk_level: message.interaction.risk_level,
+                  plan: message.interaction.plan,
+                }}
+                conversationId={conversationId ?? ''}
+                onRespond={respondToInteraction}
+                resolved={message.interaction.resolved}
+                resolvedChoice={message.interaction.response?.choice}
+              />
+            )}
 
             {message.toolCalls && message.toolCalls.length > 0 && (
               <div className="space-y-2 w-full">
