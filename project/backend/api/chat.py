@@ -116,6 +116,18 @@ async def chat_stream(
     assistant_parts: list[str] = []
     thinking_parts: list[str] = []
 
+    def _strip_tool_call_xml(text: str) -> str:
+        """Remove leaked <tool_calls> XML blocks from assistant text output."""
+        import re as _re
+        # Remove <tool_calls>...</tool_calls> blocks (with inner content)
+        text = _re.sub(r'<tool_calls>.*?</tool_calls>', '', text, flags=_re.DOTALL)
+        text = _re.sub(r'<invoke\b[^>]*>.*?</invoke>', '', text, flags=_re.DOTALL)
+        # Remove any bare <parameter ...> tags
+        text = _re.sub(r'<parameter\b[^>]*/?>', '', text)
+        # Normalize whitespace
+        text = _re.sub(r'\n{3,}', '\n\n', text).strip()
+        return text
+
     async def event_generator():
         """Generate SSE events from the agent loop and collect response."""
         nonlocal assistant_parts, thinking_parts
@@ -136,7 +148,7 @@ async def chat_stream(
                             _data = _json.loads(_line[5:].strip())
                             _content = _data.get("content", "")
                             if _content:
-                                assistant_parts.append(str(_content))
+                                assistant_parts.append(_strip_tool_call_xml(str(_content)))
                 except Exception:
                     pass
             if "thinking_delta" in event_str:
