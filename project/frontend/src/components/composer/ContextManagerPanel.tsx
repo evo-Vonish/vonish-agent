@@ -35,7 +35,7 @@ interface ContextManagerPanelProps {
 type Provider = 'deepseek' | 'kimi';
 type Tab = 'api' | 'tools';
 
-const toolCategoryOrder: ToolCategoryType[] = ['file_ops', 'workspace', 'web_search', 'system'];
+const toolCategoryOrder: ToolCategoryType[] = ['file_ops', 'workspace', 'python_ops', 'web_ops', 'shell_ops', 'system'];
 
 const providerLabels: Record<Provider, string> = {
   deepseek: 'DeepSeek',
