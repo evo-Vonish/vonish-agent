@@ -48,3 +48,6 @@ project/workspaces/
 .codebuddy/  
 .claude/ 
 .codebuddy/ 
+local_agent.db 
+*.log 
+workspace_cache/ 
