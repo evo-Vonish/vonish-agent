@@ -116,17 +116,56 @@ async def chat_stream(
     assistant_parts: list[str] = []
     thinking_parts: list[str] = []
 
-    def _strip_tool_call_xml(text: str) -> str:
-        """Remove leaked <tool_calls> XML blocks from assistant text output."""
-        import re as _re
-        # Remove <tool_calls>...</tool_calls> blocks (with inner content)
-        text = _re.sub(r'<tool_calls>.*?</tool_calls>', '', text, flags=_re.DOTALL)
-        text = _re.sub(r'<invoke\b[^>]*>.*?</invoke>', '', text, flags=_re.DOTALL)
-        # Remove any bare <parameter ...> tags
-        text = _re.sub(r'<parameter\b[^>]*/?>', '', text)
-        # Normalize whitespace
-        text = _re.sub(r'\n{3,}', '\n\n', text).strip()
-        return text
+    # Streaming XML tool-call filter state machine
+    _xml_buf = ""       # buffered partial text for filtering
+    _xml_suppress = 0   # >0 = inside tool_call XML, swallow text
+
+    def _filter_text_chunk(raw: str) -> str:
+        """Streaming filter: strip leaked <tool_calls>/<invoke> XML from text output."""
+        nonlocal _xml_buf, _xml_suppress
+        _xml_buf += raw
+        clean = ""
+        i = 0
+        while i < len(_xml_buf):
+            if _xml_suppress > 0:
+                # Inside a tool_call XML block — swallow until matching >
+                gt = _xml_buf.find(">", i)
+                if gt == -1:
+                    _xml_buf = _xml_buf[i:]
+                    return clean
+                # Check if this > closes the tool_call block
+                tag_text = _xml_buf[i:gt+1]
+                # Count nested < and > to track depth
+                opens = tag_text.count("<") - tag_text.count("</")
+                closes = tag_text.count("/>") + (1 if _xml_buf[gt-1:gt+1] == "/>" else 0)
+                _xml_suppress += opens
+                _xml_suppress -= 1  # this >
+                if _xml_suppress <= 0:
+                    _xml_suppress = 0
+                i = gt + 1
+                continue
+            # Not suppressing — look for tool_call XML start
+            lt = _xml_buf.find("<", i)
+            if lt == -1:
+                clean += _xml_buf[i:]
+                _xml_buf = ""
+                return clean
+            if lt > i:
+                clean += _xml_buf[i:lt]
+            # Check if this is a tool_call or invoke tag
+            tag_start = _xml_buf[lt:]
+            if (tag_start.startswith("<tool_calls") or
+                tag_start.startswith("</tool_calls") or
+                tag_start.startswith("<invoke") or
+                tag_start.startswith("</invoke") or
+                tag_start.startswith("<parameter")):
+                _xml_suppress = 1
+                i = lt + 1  # start scanning from after <
+            else:
+                clean += _xml_buf[lt]
+                i = lt + 1
+        _xml_buf = ""
+        return clean
 
     async def event_generator():
         """Generate SSE events from the agent loop and collect response."""
@@ -143,14 +182,29 @@ async def chat_stream(
             if "text_delta" in event_str or "markdown_delta" in event_str:
                 try:
                     _lines = event_str.strip().split("\n")
+                    filtered_lines: list[str] = []
                     for _line in _lines:
                         if _line.startswith("data:"):
                             _data = _json.loads(_line[5:].strip())
                             _content = _data.get("content", "")
                             if _content:
-                                assistant_parts.append(_strip_tool_call_xml(str(_content)))
+                                filtered = _filter_text_chunk(str(_content))
+                                if filtered:
+                                    assistant_parts.append(filtered)
+                                if filtered or not _content:
+                                    new_data = _json.dumps({"content": filtered}, ensure_ascii=False)
+                                    filtered_lines.append(f"data: {new_data}")
+                                else:
+                                    # Suppressed entirely — skip this line
+                                    filtered_lines.append(f"data: {_json.dumps({'content': ''})}")
+                            else:
+                                filtered_lines.append(_line)
+                        else:
+                            filtered_lines.append(_line)
+                    yield "\n".join(filtered_lines) + "\n\n"
                 except Exception:
-                    pass
+                    yield event_str
+                continue
             if "thinking_delta" in event_str:
                 try:
                     _lines = event_str.strip().split("\n")
