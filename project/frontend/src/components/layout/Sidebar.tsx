@@ -116,66 +116,55 @@ export function Sidebar({ className }: SidebarProps) {
   const [exporting, setExporting] = useState(false);
   const [exportFormat, setExportFormat] = useState('md');
   const [anonymize, setAnonymize] = useState(false);
+  const [exportError, setExportError] = useState('');
   const [renameOpen, setRenameOpen] = useState<string | null>(null);
   const [renameText, setRenameText] = useState('');
   const [searchResults, setSearchResults] = useState<ConversationSearchResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const handleExport = async () => {
-    if (!exportOpen) return;
+    const cid = exportOpen;
+    if (!cid) return;
+    setExportError('');
     setExporting(true);
     try {
-      const params = new URLSearchParams({
-        format: exportFormat,
-        anonymize: String(anonymize),
-        customTitle: conversations.find(c => c.id === exportOpen)?.title || 'conversation',
-      });
-      const response = await fetch(`/api/conversations/${exportOpen}/export`, {
+      const conv = conversations.find(c => c.id === cid);
+      const response = await fetch(`/api/conversations/${cid}/export`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          format: exportFormat,
-          anonymize,
-          customTitle: conversations.find(c => c.id === exportOpen)?.title || 'conversation',
-        }),
+        body: JSON.stringify({ format: exportFormat, anonymize, customTitle: conv?.title || 'conversation' }),
       });
-      if (response.ok) {
-        const blob = await response.blob();
-        const disposition = response.headers.get('Content-Disposition') || '';
-        const match = disposition.match(/filename="(.+)"/);
-        const filename = match?.[1] || `export.${exportFormat}`;
-
-        // Try native save picker first
-        if ('showSaveFilePicker' in window) {
-          try {
-            const handle = await (window as any).showSaveFilePicker({
-              suggestedName: filename,
-              types: [{
-                description: exportFormat === 'md' ? 'Markdown' : 'Text',
-                accept: { [exportFormat === 'md' ? 'text/markdown' : 'text/plain']: [`.${exportFormat}`] },
-              }],
-            });
-            const writable = await handle.createWritable();
-            await writable.write(blob);
-            await writable.close();
-          } catch (e: any) {
-            // User cancelled — do nothing
-            if (e.name !== 'AbortError') throw e;
-          }
-        } else {
-          // Fallback to auto-download
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = filename;
-          a.click();
-          URL.revokeObjectURL(url);
-        }
+      if (!response.ok) {
+        const eText = await response.text().catch(() => '');
+        setExportError(`HTTP ${response.status}: ${eText.slice(0,80)}`);
+        return;
       }
-    } catch {} finally {
-      setExporting(false);
-      setExportOpen(null);
-    }
+      const blob = await response.blob();
+      const disp = response.headers.get('Content-Disposition') || '';
+      const filename = disp.match(/filename="(.+)"/)?.[1] || `export.${exportFormat}`;
+
+      if ('showSaveFilePicker' in window) {
+        try {
+          const handle = await (window as any).showSaveFilePicker({
+            suggestedName: filename,
+            types: [{ description: 'Export', accept: { 'text/plain': [`.${exportFormat}`] } }],
+          });
+          const w = await handle.createWritable();
+          await w.write(blob);
+          await w.close();
+          setExportOpen(null);
+        } catch (e: any) {
+          if (e.name !== 'AbortError') setExportError(String(e));
+        }
+      } else {
+        const u = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = u; a.download = filename; a.click();
+        URL.revokeObjectURL(u);
+        setExportOpen(null);
+      }
+    } catch (e: any) { setExportError(e?.message || String(e));
+    } finally { setExporting(false); }
   };
 
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -679,6 +668,11 @@ export function Sidebar({ className }: SidebarProps) {
                   />
                   {t('chat.anonymize')}
                 </label>
+
+                {/* Error */}
+                {exportError && (
+                  <p className="text-[11px] text-error bg-error/10 rounded-md px-2 py-1">{exportError}</p>
+                )}
 
                 {/* Export button */}
                 <button
