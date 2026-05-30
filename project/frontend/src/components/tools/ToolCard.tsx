@@ -4,6 +4,7 @@ import {
   Globe,
   FolderOpen,
   Terminal,
+  Code2,
   ChevronDown,
   ChevronUp,
   Copy,
@@ -19,6 +20,7 @@ import { useToolStore } from '@/stores/useToolStore';
 const CATEGORY_ICON_MAP = {
   file_ops: FolderOpen,
   workspace: LayoutIcon,
+  python_ops: Code2,
   web_search: Globe,
   system: Terminal,
 };
@@ -73,22 +75,23 @@ export function ToolCard({ tool }: ToolCardProps) {
         'hover:border-border-hover hover:shadow-sm'
       )}
     >
-      {/* Main row */}
+      {/* Main row — use grid instead of flex to prevent squeeze-overlap */}
       <div
-        className="flex items-center gap-3 px-4 py-3 cursor-pointer"
+        className="grid items-center gap-2 px-3 py-2.5 cursor-pointer"
+        style={{ gridTemplateColumns: '32px 1fr auto auto auto 20px' }}
         onClick={() => setExpanded(!expanded)}
       >
         {/* Icon */}
-        <div className="flex-shrink-0 w-8 h-8 rounded-md bg-primary/10 flex items-center justify-center">
-          <IconComponent className="w-4 h-4 text-primary" />
+        <div className="w-8 h-8 rounded-md bg-primary/10 flex items-center justify-center">
+          <IconComponent className="w-4 h-4 text-primary flex-shrink-0" />
         </div>
 
-        {/* Name + Description */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-foreground">{tool.name}</span>
+        {/* Name + Description — truncates to prevent overflow */}
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5">
+            <span className="text-sm font-semibold text-foreground truncate">{tool.name}</span>
             {tool.supportsParallel && (
-              <Zap className="w-3 h-3 text-warning" />
+              <Zap className="w-3 h-3 text-warning flex-shrink-0" />
             )}
           </div>
           <p className="text-xs text-foreground-muted truncate">{tool.description}</p>
@@ -97,30 +100,21 @@ export function ToolCard({ tool }: ToolCardProps) {
         {/* Approval Level Badge */}
         <span
           className={cn(
-            'flex-shrink-0 px-2 py-0.5 text-[10px] font-medium rounded-full border',
+            'px-1.5 py-0.5 text-[10px] font-medium rounded-full border whitespace-nowrap',
             approvalColor
           )}
         >
           {approvalLabel}
         </span>
 
-        {/* Use count */}
-        <div className="hidden sm:flex flex-shrink-0 items-center gap-1 text-xs text-foreground-subtle">
-          <span className="font-medium">{tool.useCount.toLocaleString()}</span>
-          <span className="text-foreground-subtle/60">uses</span>
-        </div>
-
         {/* Toggle */}
-        <div
-          className="flex-shrink-0"
-          onClick={(e) => e.stopPropagation()}
-        >
+        <div onClick={(e) => e.stopPropagation()}>
           <ToolToggle enabled={tool.isEnabled} onToggle={() => toggleTool(tool.name)} />
         </div>
 
         {/* Expand chevron */}
-        <div className="flex-shrink-0 text-foreground-subtle">
-          {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+        <div className="text-foreground-subtle flex items-center justify-center">
+          {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
         </div>
       </div>
 
