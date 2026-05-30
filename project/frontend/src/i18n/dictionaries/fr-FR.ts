@@ -114,6 +114,15 @@ const frFR: I18nDictionary = {
   "thinking.expand": "Développer",
   "thinking.streaming": "Réflexion…",
 
+  "context.title": "Contexte",
+  "context.rounds": "Tours",
+  "context.toolCalls": "Appels outil",
+  "context.files": "Fichiers",
+  "context.memory": "Mémoire",
+  "context.profile": "Profil",
+  "context.components": "Composants",
+  "context.compression": "Compression",
+
   "user.label": "Vous",
   "assistant.label": "Assistant",
   "system.label": "Système",

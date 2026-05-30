@@ -116,6 +116,15 @@ const enUS: I18nDictionary = {
   "thinking.expand": "Expand",
   "thinking.streaming": "Thinking…",
 
+  "context.title": "Context",
+  "context.rounds": "Rounds",
+  "context.toolCalls": "Tool Calls",
+  "context.files": "Files",
+  "context.memory": "Memory",
+  "context.profile": "Profile",
+  "context.components": "Components",
+  "context.compression": "Compression",
+
   "user.label": "You",
   "assistant.label": "Assistant",
   "system.label": "System",

@@ -114,6 +114,15 @@ const deDE: I18nDictionary = {
   "thinking.expand": "Ausklappen",
   "thinking.streaming": "Denkt nach…",
 
+  "context.title": "Kontext",
+  "context.rounds": "Runden",
+  "context.toolCalls": "Tool-Aufrufe",
+  "context.files": "Dateien",
+  "context.memory": "Speicher",
+  "context.profile": "Profil",
+  "context.components": "Komponenten",
+  "context.compression": "Kompression",
+
   "user.label": "Du",
   "assistant.label": "Assistant",
   "system.label": "System",

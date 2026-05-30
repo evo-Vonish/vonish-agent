@@ -118,6 +118,15 @@ const zhCN: I18nDictionary = {
   "thinking.expand": "展开",
   "thinking.streaming": "思考中…",
 
+  "context.title": "上下文",
+  "context.rounds": "消息轮数",
+  "context.toolCalls": "工具调用",
+  "context.files": "文件数",
+  "context.memory": "记忆项",
+  "context.profile": "档位",
+  "context.components": "组件占用",
+  "context.compression": "压缩",
+
   "user.label": "你",
   "assistant.label": "Assistant",
   "system.label": "System",

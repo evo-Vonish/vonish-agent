@@ -114,6 +114,15 @@ const jaJP: I18nDictionary = {
   "thinking.expand": "開く",
   "thinking.streaming": "思考中…",
 
+  "context.title": "コンテキスト",
+  "context.rounds": "ラウンド",
+  "context.toolCalls": "ツール呼出",
+  "context.files": "ファイル",
+  "context.memory": "メモリ",
+  "context.profile": "プロファイル",
+  "context.components": "コンポーネント",
+  "context.compression": "圧縮",
+
   "user.label": "あなた",
   "assistant.label": "Assistant",
   "system.label": "System",

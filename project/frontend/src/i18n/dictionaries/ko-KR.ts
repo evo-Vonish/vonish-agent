@@ -114,6 +114,15 @@ const koKR: I18nDictionary = {
   "thinking.expand": "펼치기",
   "thinking.streaming": "생각 중…",
 
+  "context.title": "컨텍스트",
+  "context.rounds": "라운드",
+  "context.toolCalls": "도구 호출",
+  "context.files": "파일",
+  "context.memory": "메모리",
+  "context.profile": "프로필",
+  "context.components": "구성 요소",
+  "context.compression": "압축",
+
   "user.label": "나",
   "assistant.label": "Assistant",
   "system.label": "System",
