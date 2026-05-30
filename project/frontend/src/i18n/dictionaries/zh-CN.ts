@@ -5,6 +5,8 @@ import type { I18nDictionary } from "../types";
 const zhCN: I18nDictionary = {
   "chat.new": "新对话",
   "chat.search": "搜索会话",
+  "chat.polish": "润色文字",
+  "chat.revert": "撤销润色",
   "chat.delete": "删除",
   "chat.deleteConfirm": "确认删除此会话？工作区文件将一同清理。",
   "chat.cancel": "取消",

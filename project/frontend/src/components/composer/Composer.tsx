@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { Send, Paperclip, Mic, Sparkles, Square, ChevronDown, ChevronUp } from 'lucide-react';
+import { Send, Paperclip, Mic, Sparkles, Square, ChevronDown, ChevronUp, Undo2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useChatStore } from '@/stores/chatStore';
 import { useI18n } from '@/i18n';
@@ -19,9 +19,33 @@ const MAX_EXPANDED_HEIGHT = 320; // px
 export function Composer({ className }: ComposerProps) {
   const [text, setText] = useState('');
   const [expanded, setExpanded] = useState(false);
+  const [polishing, setPolishing] = useState(false);
+  const [originalText, setOriginalText] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { sendMessage, stopGeneration, isStreaming } = useChatStore();
   const { t } = useI18n();
+
+  const handlePolish = async () => {
+    const trimmed = text.trim();
+    if (!trimmed || polishing) return;
+    setOriginalText(trimmed);
+    setPolishing(true);
+    try {
+      const response = await fetch('/api/polish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: trimmed }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setText(data.polished || trimmed);
+      }
+    } catch {} finally { setPolishing(false); }
+  };
+
+  const handleRevert = () => {
+    if (originalText) { setText(originalText); setOriginalText(''); }
+  };
 
   const handleSend = useCallback(() => {
     const trimmed = text.trim();
@@ -94,9 +118,33 @@ export function Composer({ className }: ComposerProps) {
           <button className="p-1.5 rounded-md hover:bg-surface-hover text-foreground-muted hover:text-foreground transition-colors">
             <Mic className="w-4 h-4" />
           </button>
-          <button className="p-1.5 rounded-md hover:bg-surface-hover text-foreground-muted hover:text-foreground transition-colors ml-auto">
-            <Sparkles className="w-4 h-4" />
-          </button>
+          {polishing ? (
+            <button className="p-1.5 rounded-md text-warning animate-pulse ml-auto" disabled>
+              <Sparkles className="w-4 h-4 animate-spin" />
+            </button>
+          ) : originalText ? (
+            <button
+              onClick={handleRevert}
+              className="p-1.5 rounded-md hover:bg-surface-hover text-foreground-muted hover:text-foreground transition-colors ml-auto"
+              title={t('chat.revert')}
+            >
+              <Undo2 className="w-4 h-4" />
+            </button>
+          ) : (
+            <button
+              onClick={handlePolish}
+              disabled={!text.trim()}
+              className={cn(
+                'p-1.5 rounded-md transition-colors ml-auto',
+                text.trim()
+                  ? 'hover:bg-surface-hover text-foreground-muted hover:text-foreground'
+                  : 'text-foreground-subtle cursor-not-allowed'
+              )}
+              title={t('chat.polish')}
+            >
+              <Sparkles className="w-4 h-4" />
+            </button>
+          )}
         </div>
 
         {/* Input area */}

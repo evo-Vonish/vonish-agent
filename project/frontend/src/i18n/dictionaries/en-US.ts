@@ -3,6 +3,8 @@ import type { I18nDictionary } from "../types";
 const enUS: I18nDictionary = {
   "chat.new": "New Chat",
   "chat.search": "Search conversations",
+  "chat.polish": "Polish text",
+  "chat.revert": "Revert",
   "chat.delete": "Delete",
   "chat.deleteConfirm": "Delete this conversation? Workspace files will be removed.",
   "chat.cancel": "Cancel",

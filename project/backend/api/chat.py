@@ -323,3 +323,48 @@ async def resume_interaction(
     })
     logger.info(f"Interaction {interaction_id} resumed with choice: {request.choice}")
     return {"status": "resumed", "conversation_id": conversation_id}
+
+
+# ── Polish Text ─────────────────────────────────────────────────────────────
+
+class PolishRequest(BaseModel):
+    text: str = Field(..., description="Text to polish")
+    model: str = Field(default="deepseek-chat")
+
+
+@router.post("/polish")
+async def polish_text(
+    request: PolishRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Polish user input: fix grammar, improve clarity, keep meaning intact."""
+    try:
+        import openai
+
+        config = await _get_api_config_for_user(db, user.id, request.model)
+        client = openai.AsyncOpenAI(api_key=config.api_key, base_url=config.api_base)
+
+        response = await client.chat.completions.create(
+            model=request.model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        "Polish the following text. Fix grammar, improve clarity and flow, "
+                        "but keep the meaning, tone, and language exactly the same. "
+                        "Do not add information or change technical terms. "
+                        "Return ONLY the polished text, no explanations.\n\n"
+                        f"Text: {request.text}"
+                    ),
+                }
+            ],
+            max_tokens=500,
+            temperature=0.3,
+        )
+        polished = response.choices[0].message.content.strip()
+        return {"polished": polished, "original": request.text}
+    except Exception as e:
+        logger.error(f"Polish failed: {e}")
+        return {"polished": request.text, "original": request.text, "error": str(e)}
+
