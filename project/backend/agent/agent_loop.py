@@ -450,25 +450,38 @@ class AgentLoop:
     async def _get_conversation_history(
         self, conversation_id: str
     ) -> list[MessageBlock]:
-        """Get conversation history from in-memory storage.
+        """Get conversation history from the database."""
+        import uuid as _uuid
+        from db.models import Message as MessageModel
+        from db.session import get_session_maker
+        from sqlalchemy import select
 
-        Queries the conversations module's _messages dict to retrieve
-        previously stored messages (from chat.py storage).
-        """
-        from api.conversations import _messages as conv_messages
-
-        stored = conv_messages.get(conversation_id, [])
         history: list[MessageBlock] = []
-        for m in stored:
-            role = m.get("role", "")
-            content = m.get("content", "")
-            thinking = m.get("thinking")
-            if role in ("user", "assistant"):
+        try:
+            conv_uuid = _uuid.UUID(conversation_id)
+        except ValueError:
+            return history
+
+        session_maker = get_session_maker()
+        async with session_maker() as db:
+            q = (
+                select(MessageModel)
+                .where(MessageModel.conversation_id == conv_uuid)
+                .order_by(MessageModel.created_at.asc())
+                .limit(20)
+            )
+            rows = (await db.execute(q)).scalars().all()
+            for m in rows:
+                if m.role not in ("user", "assistant"):
+                    continue
+                text = ""
+                if m.content and isinstance(m.content, list):
+                    text = "".join(b.get("text", "") for b in m.content if b.get("type") == "text")
                 history.append(
                     MessageBlock(
-                        role=role,
-                        content=content,
-                        thinking_content=thinking,
+                        role=m.role,
+                        content=text,
+                        thinking_content=m.thinking_content,
                     )
                 )
         return history

@@ -1,30 +1,34 @@
-"""Conversation CRUD API routes.
-
-Provides:
-- POST /api/conversations - Create conversation
-- GET /api/conversations - List conversations
-- GET /api/conversations/{id} - Get conversation details
-- DELETE /api/conversations/{id} - Delete conversation
-- POST /api/conversations/{id}/clear - Clear messages
-"""
+"""Conversation CRUD API routes — backed by SQLite via SQLAlchemy ORM."""
 
 from __future__ import annotations
 
+import uuid as uuid_lib
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from core.auth import User, get_current_user
 from core.logging import get_logger
+from db.models import Conversation, Message
 from db.session import get_db
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api")
+
+# Fixed mock user UUID (matches mock User.id = "mock-user-001")
+_MOCK_USER_UUID = uuid_lib.UUID("00000000-0000-0000-0000-000000000001")
+
+
+def _user_uuid(user: User) -> UUID:
+    """Convert mock user id to a UUID for DB queries."""
+    return _MOCK_USER_UUID
 
 
 # ---------------------------------------------------------------------------
@@ -33,19 +37,13 @@ router = APIRouter(prefix="/api")
 
 
 class CreateConversationRequest(BaseModel):
-    """Request to create a new conversation."""
-
-    title: str = Field(default="新对话", description="Conversation title")
-    model: str = Field(default="deepseek-v4-pro", description="Model to use")
-    context_profile: str = Field(default="balanced", description="Context profile")
-    metadata: dict[str, Any] = Field(
-        default_factory=dict, description="Additional metadata"
-    )
+    title: str = Field(default="新对话")
+    model: str = Field(default="deepseek-v4-pro")
+    context_profile: str = Field(default="balanced")
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ConversationResponse(BaseModel):
-    """Conversation response model."""
-
     id: str
     title: str
     model: str
@@ -57,18 +55,29 @@ class ConversationResponse(BaseModel):
 
 
 class ConversationListResponse(BaseModel):
-    """List of conversations response."""
-
     conversations: list[ConversationResponse]
     total: int
 
 
-# ---------------------------------------------------------------------------
-# In-Memory Store (Placeholder)
-# ---------------------------------------------------------------------------
+class SummarizeTitleRequest(BaseModel):
+    model: str = Field(default="deepseek-v4-pro")
 
-_conversations: dict[str, dict[str, Any]] = {}
-_messages: dict[str, list[dict[str, Any]]] = {}
+
+class SummarizeTitleResponse(BaseModel):
+    title: str
+
+
+def _conv_to_response(conv: Conversation, msg_count: int = 0) -> ConversationResponse:
+    return ConversationResponse(
+        id=str(conv.id),
+        title=conv.title,
+        model=conv.model,
+        context_profile=conv.context_profile,
+        created_at=conv.created_at.isoformat() if conv.created_at else "",
+        updated_at=conv.updated_at.isoformat() if conv.updated_at else "",
+        message_count=msg_count,
+        metadata=conv.metadata_ or {},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -82,39 +91,19 @@ async def create_conversation(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Create a new conversation."""
-    import uuid
-
-    conv_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc).isoformat()
-
-    conversation = {
-        "id": conv_id,
-        "user_id": user.id,
-        "title": request.title,
-        "model": request.model,
-        "context_profile": request.context_profile,
-        "workspace_path": f"/workspaces/{user.id}/{conv_id}",
-        "metadata": request.metadata,
-        "created_at": now,
-        "updated_at": now,
-    }
-
-    _conversations[conv_id] = conversation
-    _messages[conv_id] = []
-
-    logger.info(f"Created conversation: {conv_id}")
-
-    return ConversationResponse(
-        id=conv_id,
+    conv = Conversation(
+        user_id=_user_uuid(user),
         title=request.title,
         model=request.model,
         context_profile=request.context_profile,
-        created_at=now,
-        updated_at=now,
-        message_count=0,
-        metadata=request.metadata,
+        workspace_path=f"/workspaces/{user.id}/{uuid_lib.uuid4()}",
+        metadata_=request.metadata,
     )
+    db.add(conv)
+    await db.commit()
+    await db.refresh(conv)
+    logger.info(f"Created conversation: {conv.id}")
+    return _conv_to_response(conv, 0)
 
 
 @router.get("/conversations", response_model=ConversationListResponse)
@@ -124,35 +113,38 @@ async def list_conversations(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """List conversations for the current user."""
-    user_convs = [
-        conv for conv in _conversations.values()
-        if conv.get("user_id") == user.id
-    ]
+    uid = _user_uuid(user)
+    # Count total
+    count_q = select(func.count(Conversation.id)).where(Conversation.user_id == uid)
+    total = (await db.execute(count_q)).scalar() or 0
 
-    # Sort by updated_at descending
-    user_convs.sort(key=lambda c: c.get("updated_at", ""), reverse=True)
+    # Fetch page with message count
+    q = (
+        select(Conversation)
+        .where(Conversation.user_id == uid)
+        .order_by(Conversation.updated_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    rows = (await db.execute(q)).scalars().all()
 
-    total = len(user_convs)
-    start = (page - 1) * page_size
-    end = start + page_size
-    paginated = user_convs[start:end]
-
-    conversations = [
-        ConversationResponse(
-            id=c["id"],
-            title=c["title"],
-            model=c["model"],
-            context_profile=c["context_profile"],
-            created_at=c["created_at"],
-            updated_at=c["updated_at"],
-            message_count=len(_messages.get(c["id"], [])),
-            metadata=c.get("metadata", {}),
+    # Get message counts in one query
+    msg_counts: dict[UUID, int] = {}
+    if rows:
+        from sqlalchemy import case
+        counts_q = (
+            select(Message.conversation_id, func.count(Message.id))
+            .where(Message.conversation_id.in_([r.id for r in rows]))
+            .group_by(Message.conversation_id)
         )
-        for c in paginated
-    ]
+        for cid, cnt in (await db.execute(counts_q)).all():
+            msg_counts[cid] = cnt
 
-    return ConversationListResponse(conversations=conversations, total=total)
+    convs = [
+        _conv_to_response(c, msg_counts.get(c.id, 0))
+        for c in rows
+    ]
+    return ConversationListResponse(conversations=convs, total=total)
 
 
 @router.get("/conversations/{conversation_id}", response_model=ConversationResponse)
@@ -161,21 +153,49 @@ async def get_conversation(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Get a conversation by ID."""
-    conv = _conversations.get(conversation_id)
+    q = select(Conversation).where(Conversation.id == UUID(conversation_id))
+    conv = (await db.execute(q)).scalar()
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    return ConversationResponse(
-        id=conv["id"],
-        title=conv["title"],
-        model=conv["model"],
-        context_profile=conv["context_profile"],
-        created_at=conv["created_at"],
-        updated_at=conv["updated_at"],
-        message_count=len(_messages.get(conversation_id, [])),
-        metadata=conv.get("metadata", {}),
+    cnt_q = select(func.count(Message.id)).where(Message.conversation_id == conv.id)
+    msg_count = (await db.execute(cnt_q)).scalar() or 0
+    return _conv_to_response(conv, msg_count)
+
+
+@router.post("/conversations/{conversation_id}/summarize-title", response_model=SummarizeTitleResponse)
+async def summarize_title(
+    conversation_id: str,
+    request: SummarizeTitleRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    from services.llm_summary_service import summarize_conversation_title
+
+    conv_id = UUID(conversation_id)
+    q = select(Conversation).where(Conversation.id == conv_id)
+    conv = (await db.execute(q)).scalar()
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    msgs_q = (
+        select(Message)
+        .where(Message.conversation_id == conv_id)
+        .order_by(Message.created_at.asc())
+        .limit(4)
     )
+    msgs = (await db.execute(msgs_q)).scalars().all()
+    msg_data = [
+        {"role": m.role, "content": _extract_text(m.content)}
+        for m in msgs
+    ]
+
+    title = await summarize_conversation_title(
+        db=db, user_id=user.id, model=request.model, messages=msg_data
+    )
+    conv.title = title
+    await db.commit()
+    return SummarizeTitleResponse(title=title)
 
 
 @router.delete("/conversations/{conversation_id}")
@@ -184,15 +204,15 @@ async def delete_conversation(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Delete a conversation."""
-    conv = _conversations.pop(conversation_id, None)
+    conv_id = UUID(conversation_id)
+    q = select(Conversation).where(Conversation.id == conv_id)
+    conv = (await db.execute(q)).scalar()
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    _messages.pop(conversation_id, None)
-
+    await db.delete(conv)
+    await db.commit()
     logger.info(f"Deleted conversation: {conversation_id}")
-
     return {"status": "deleted", "conversation_id": conversation_id}
 
 
@@ -202,16 +222,17 @@ async def clear_conversation(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Clear all messages from a conversation."""
-    conv = _conversations.get(conversation_id)
+    conv_id = UUID(conversation_id)
+    q = select(Conversation).where(Conversation.id == conv_id)
+    conv = (await db.execute(q)).scalar()
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    _messages[conversation_id] = []
-    conv["updated_at"] = datetime.now(timezone.utc).isoformat()
-
+    del_q = delete(Message).where(Message.conversation_id == conv_id)
+    await db.execute(del_q)
+    conv.updated_at = datetime.now(timezone.utc)
+    await db.commit()
     logger.info(f"Cleared conversation: {conversation_id}")
-
     return {"status": "cleared", "conversation_id": conversation_id}
 
 
@@ -221,8 +242,6 @@ async def clear_conversation(
 
 
 class MessageItem(BaseModel):
-    """Single message in history."""
-
     role: str
     content: str
     thinking: str | None = None
@@ -230,10 +249,16 @@ class MessageItem(BaseModel):
 
 
 class MessagesResponse(BaseModel):
-    """Messages response model."""
-
     messages: list[MessageItem]
     conversation_id: str
+
+
+def _extract_text(content: list[dict] | None) -> str:
+    """Extract plain text from content blocks."""
+    if not content:
+        return ""
+    texts = [b.get("text", "") for b in content if b.get("type") == "text"]
+    return "\n".join(texts)
 
 
 @router.get("/conversations/{conversation_id}/messages", response_model=MessagesResponse)
@@ -242,15 +267,29 @@ async def get_conversation_messages(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Get all messages for a conversation."""
-    conv = _conversations.get(conversation_id)
+    conv_id = UUID(conversation_id)
+    q = select(Conversation).where(Conversation.id == conv_id)
+    conv = (await db.execute(q)).scalar()
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    if conv.get("user_id") != user.id:
-        raise HTTPException(status_code=403, detail="Not authorized")
 
-    msgs = _messages.get(conversation_id, [])
-    return MessagesResponse(
-        conversation_id=conversation_id,
-        messages=[MessageItem(**m) for m in msgs],
+    msgs_q = (
+        select(Message)
+        .where(Message.conversation_id == conv_id)
+        .order_by(Message.created_at.asc())
     )
+    msgs = (await db.execute(msgs_q)).scalars().all()
+
+    items = [
+        MessageItem(
+            role=m.role,
+            content=_extract_text(m.content),
+            thinking=m.thinking_content,
+            timestamp=m.created_at.isoformat() if m.created_at else "",
+        )
+        for m in msgs
+    ]
+    return MessagesResponse(messages=items, conversation_id=conversation_id)
+
+# Keep backward-compat alias for chat.py
+_messages: dict[str, list[dict[str, Any]]] = {}

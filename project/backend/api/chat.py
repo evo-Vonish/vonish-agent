@@ -48,6 +48,13 @@ class StopRequest(BaseModel):
     reason: str = Field(default="user_request", description="Stop reason")
 
 
+class ThinkingSummaryRequest(BaseModel):
+    """Request body for summarizing a thinking block."""
+
+    content: str = Field(..., description="Thinking content to summarize", min_length=1)
+    model: str = Field(default="deepseek-v4-pro", description="Model to use")
+
+
 # ---------------------------------------------------------------------------
 # Agent Loop Instance
 # ---------------------------------------------------------------------------
@@ -90,15 +97,20 @@ async def chat_stream(
         else None
     )
 
-    # Store user message
-    from api.conversations import _messages as conv_messages
-    conv_messages.setdefault(conversation_id, []).append({
-        "role": "user",
-        "content": request.message,
-        "timestamp": __import__("datetime").datetime.now(
-            __import__("datetime").timezone.utc
-        ).isoformat(),
-    })
+    # Store user message to DB
+    import json as _json
+    import uuid as _uuid
+    from db.models import Message as MessageModel
+
+    conv_uuid = _uuid.UUID(conversation_id) if conversation_id != "test" else _uuid.uuid4()
+    user_msg = MessageModel(
+        conversation_id=conv_uuid,
+        role="user",
+        content=[{"type": "text", "text": request.message}],
+        model=request.model,
+    )
+    db.add(user_msg)
+    await db.commit()
 
     # Collect assistant response from SSE events
     assistant_parts: list[str] = []
@@ -116,10 +128,8 @@ async def chat_stream(
             api_base=api_config.api_base if api_config else None,
             resources=getattr(request, 'resources', None),
         ):
-            # Collect text content from SSE events for storage
             if "text_delta" in event_str or "markdown_delta" in event_str:
                 try:
-                    import json as _json
                     _lines = event_str.strip().split("\n")
                     for _line in _lines:
                         if _line.startswith("data:"):
@@ -131,7 +141,6 @@ async def chat_stream(
                     pass
             if "thinking_delta" in event_str:
                 try:
-                    import json as _json
                     _lines = event_str.strip().split("\n")
                     for _line in _lines:
                         if _line.startswith("data:"):
@@ -143,19 +152,18 @@ async def chat_stream(
                     pass
             yield event_str
 
-        # After streaming ends, store assistant response
+        # After streaming ends, store assistant response to DB
         full_content = "".join(assistant_parts)
         if full_content:
-            conv_messages.setdefault(conversation_id, []).append({
-                "role": "assistant",
-                "content": full_content,
-                "thinking": "".join(thinking_parts) if thinking_parts else None,
-                "timestamp": (
-                    __import__("datetime").datetime.now(
-                        __import__("datetime").timezone.utc
-                    ).isoformat()
-                ),
-            })
+            assistant_msg = MessageModel(
+                conversation_id=conv_uuid,
+                role="assistant",
+                content=[{"type": "text", "text": full_content}],
+                thinking_content="".join(thinking_parts) if thinking_parts else None,
+                model=request.model,
+            )
+            db.add(assistant_msg)
+            await db.commit()
 
     return StreamingResponse(
         event_generator(),
@@ -166,6 +174,24 @@ async def chat_stream(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.post("/chat/thinking-summary")
+async def thinking_summary(
+    request: ThinkingSummaryRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Summarize a raw thinking block into a short UI phrase."""
+    from services.llm_summary_service import summarize_thinking_phrase
+
+    summary = await summarize_thinking_phrase(
+        db=db,
+        user_id=user.id,
+        model=request.model,
+        thinking=request.content,
+    )
+    return {"summary": summary}
 
 
 @router.post("/chat/{conversation_id}/stop")
