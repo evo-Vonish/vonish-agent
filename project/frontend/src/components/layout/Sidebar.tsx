@@ -141,14 +141,36 @@ export function Sidebar({ className }: SidebarProps) {
       });
       if (response.ok) {
         const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
         const disposition = response.headers.get('Content-Disposition') || '';
         const match = disposition.match(/filename="(.+)"/);
-        a.download = match?.[1] || `export.${exportFormat}`;
-        a.click();
-        URL.revokeObjectURL(url);
+        const filename = match?.[1] || `export.${exportFormat}`;
+
+        // Try native save picker first
+        if ('showSaveFilePicker' in window) {
+          try {
+            const handle = await (window as any).showSaveFilePicker({
+              suggestedName: filename,
+              types: [{
+                description: exportFormat === 'md' ? 'Markdown' : 'Text',
+                accept: { [exportFormat === 'md' ? 'text/markdown' : 'text/plain']: [`.${exportFormat}`] },
+              }],
+            });
+            const writable = await handle.createWritable();
+            await writable.write(blob);
+            await writable.close();
+          } catch (e: any) {
+            // User cancelled — do nothing
+            if (e.name !== 'AbortError') throw e;
+          }
+        } else {
+          // Fallback to auto-download
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = filename;
+          a.click();
+          URL.revokeObjectURL(url);
+        }
       }
     } catch {} finally {
       setExporting(false);
