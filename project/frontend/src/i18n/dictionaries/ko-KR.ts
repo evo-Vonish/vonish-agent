@@ -3,6 +3,10 @@ import type { I18nDictionary } from "../types";
 const koKR: I18nDictionary = {
   "chat.new": "새 채팅",
   "chat.search": "대화 검색",
+  "chat.delete": "삭제",
+  "chat.deleteConfirm": "이 대화를 삭제할까요? 작업공간 파일도 함께 제거됩니다.",
+  "chat.cancel": "취소",
+  "chat.messages": "개의 메시지",
   "chat.title": "vonish Agent",
   "chat.empty": "무엇을 도와드릴까요?",
   "chat.empty.desc": "vonish Agent는 코드 작성, 디버깅, 데이터 분석, UI 디자인을 돕는 AI 어시스턴트입니다.",

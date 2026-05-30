@@ -3,6 +3,10 @@ import type { I18nDictionary } from "../types";
 const jaJP: I18nDictionary = {
   "chat.new": "新規チャット",
   "chat.search": "会話を検索",
+  "chat.delete": "削除",
+  "chat.deleteConfirm": "この会話を削除しますか？ワークスペースも削除されます。",
+  "chat.cancel": "キャンセル",
+  "chat.messages": "件のメッセージ",
   "chat.title": "vonish Agent",
   "chat.empty": "何をお手伝いしましょうか？",
   "chat.empty.desc": "vonish Agentは、コード作成、デバッグ、データ分析、UIデザインを支援するAIアシスタントです。",

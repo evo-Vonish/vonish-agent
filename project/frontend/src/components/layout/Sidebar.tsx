@@ -89,8 +89,15 @@ export function Sidebar({ className }: SidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'chats' | 'files'>('chats');
   const [deleteMenuOpen, setDeleteMenuOpen] = useState<string | null>(null);
+  const [renameOpen, setRenameOpen] = useState<string | null>(null);
+  const [renameText, setRenameText] = useState('');
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const renameRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (renameOpen && renameRef.current) renameRef.current.focus();
+  }, [renameOpen]);
 
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
@@ -373,23 +380,83 @@ export function Sidebar({ className }: SidebarProps) {
                     : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground'
                 )}
                 onClick={() => selectConversation(conv.id)}
+                onDoubleClick={() => {
+                  setRenameOpen(conv.id);
+                  setRenameText(conv.title);
+                }}
               >
                 <MessageSquare className="w-3.5 h-3.5 flex-shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <div className="text-xs font-medium truncate">{conv.title}</div>
+                  {renameOpen === conv.id ? (
+                    <input
+                      ref={renameRef}
+                      value={renameText}
+                      onChange={(e) => setRenameText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          conv.title = renameText;
+                          setRenameOpen(null);
+                        }
+                        if (e.key === 'Escape') setRenameOpen(null);
+                      }}
+                      onBlur={() => {
+                        conv.title = renameText;
+                        setRenameOpen(null);
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                      className="w-full text-xs bg-background border border-primary/50 rounded px-1 py-0.5 text-foreground outline-none"
+                    />
+                  ) : (
+                    <div className="text-xs font-medium truncate">{conv.title}</div>
+                  )}
                   <div className="text-[10px] opacity-50 truncate">
-                    {conv.messageCount} 条消息 · {formatTime(conv.updatedAt)}
+                    {conv.messageCount} {t('chat.messages')} · {formatTime(conv.updatedAt)}
                   </div>
                 </div>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setDeleteMenuOpen(deleteMenuOpen === conv.id ? null : conv.id);
-                  }}
-                  className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-error/20 hover:text-error transition-all"
-                >
-                  <Trash2 className="w-3 h-3" />
-                </button>
+
+                {/* Delete button */}
+                <div className="relative">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDeleteMenuOpen(deleteMenuOpen === conv.id ? null : conv.id);
+                    }}
+                    className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-error/20 hover:text-error transition-all"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+
+                  {/* Confirmation popover */}
+                  {deleteMenuOpen === conv.id && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); setDeleteMenuOpen(null); }} />
+                      <div
+                        className="absolute right-0 top-full mt-1 w-48 bg-surface-elevated border border-border rounded-xl shadow-2xl py-2 z-50 animate-in fade-in slide-in-from-top-1 duration-150"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <p className="px-3 pb-2 text-[11px] text-foreground-muted border-b border-border">
+                          {t('chat.deleteConfirm')}
+                        </p>
+                        <button
+                          onClick={() => {
+                            deleteConversation(conv.id);
+                            setDeleteMenuOpen(null);
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-error hover:bg-error/10 transition-colors"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          {t('chat.delete')}
+                        </button>
+                        <button
+                          onClick={() => setDeleteMenuOpen(null)}
+                          className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-foreground-muted hover:bg-surface-hover transition-colors"
+                        >
+                          {t('chat.cancel')}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
             ))}
           </div>

@@ -3,6 +3,10 @@ import type { I18nDictionary } from "../types";
 const frFR: I18nDictionary = {
   "chat.new": "Nouvelle discussion",
   "chat.search": "Rechercher",
+  "chat.delete": "Supprimer",
+  "chat.deleteConfirm": "Supprimer cette conversation ? Les fichiers seront effacés.",
+  "chat.cancel": "Annuler",
+  "chat.messages": "messages",
   "chat.title": "vonish Agent",
   "chat.empty": "Que puis-je faire pour vous ?",
   "chat.empty.desc": "Je suis vonish Agent, un assistant de codage. Code, débogage, analyse de données, UI.",
