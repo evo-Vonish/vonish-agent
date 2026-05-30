@@ -6,6 +6,7 @@ lifespan events for the Agent system backend.
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -67,6 +68,39 @@ async def lifespan(app: FastAPI):
         logger.info("Default tools registered.")
     except Exception as e:
         logger.error(f"Tool registration failed: {e}")
+
+    # Clean up orphaned workspace directories (no corresponding DB conversation)
+    try:
+        from uuid import UUID
+        import shutil
+        from db.models import Conversation as ConvModel
+        from db.session import get_session_maker
+
+        ws_root = Path(settings.workspace_root)
+        if ws_root.exists():
+            # Get all valid conversation IDs from DB
+            session_maker = get_session_maker()
+            async with session_maker() as db_session:
+                from sqlalchemy import select
+                result = await db_session.execute(select(ConvModel.id))
+                valid_ids = {str(r) for r in result.scalars().all()}
+
+            # Walk workspace root and remove dirs not in DB
+            cleaned = 0
+            for d in ws_root.iterdir():
+                if d.is_dir() and d.name in valid_ids:
+                    continue
+                if d.is_dir():
+                    try:
+                        await asyncio.to_thread(shutil.rmtree, d, ignore_errors=True)
+                        cleaned += 1
+                        logger.info(f"Orphan cleanup: removed {d}")
+                    except Exception:
+                        pass
+            if cleaned:
+                logger.info(f"Orphan cleanup: removed {cleaned} zombie workspace(s)")
+    except Exception as e:
+        logger.warning(f"Orphan cleanup skipped: {e}")
 
     logger.info("Agent Backend v2 is ready!")
 

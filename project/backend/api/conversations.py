@@ -212,6 +212,17 @@ async def delete_conversation(
 
     await db.delete(conv)
     await db.commit()
+
+    # Clean up workspace directory on disk
+    import asyncio
+    import shutil
+    from pathlib import Path
+    from core.config import settings
+    ws_path = Path(settings.workspace_root) / conversation_id
+    if ws_path.exists():
+        await asyncio.to_thread(shutil.rmtree, ws_path, ignore_errors=True)
+        logger.info(f"Cleaned workspace: {ws_path}")
+
     logger.info(f"Deleted conversation: {conversation_id}")
     return {"status": "deleted", "conversation_id": conversation_id}
 
