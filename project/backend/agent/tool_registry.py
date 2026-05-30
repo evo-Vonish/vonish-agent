@@ -317,13 +317,42 @@ def register_default_tools() -> None:
     registry.register(
         ToolDefinition(
             name="ipython",
-            description="Execute Python code in an IPython environment.",
+            description=(
+                "Execute Python code in a persistent IPython kernel bound to the current "
+                "conversation workspace. Use for calculations, data analysis, chart "
+                "generation, and creating files under the workspace. Returns stdout, "
+                "errors, display data, and created artifacts."
+            ),
             parameters={
                 "type": "object",
                 "properties": {
                     "code": {
                         "type": "string",
                         "description": "Python code to execute",
+                    },
+                    "session_mode": {
+                        "type": "string",
+                        "enum": ["continue", "new", "reset", "ephemeral"],
+                        "description": (
+                            "continue reuses the current kernel; new creates or reuses "
+                            "a named session; reset restarts the kernel; ephemeral uses "
+                            "a temporary fresh kernel"
+                        ),
+                        "default": "continue",
+                    },
+                    "session_id": {
+                        "type": "string",
+                        "description": "Optional named session id",
+                    },
+                    "timeout_seconds": {
+                        "type": "integer",
+                        "description": "Execution timeout in seconds",
+                        "default": 30,
+                    },
+                    "restart": {
+                        "type": "boolean",
+                        "description": "Restart the default kernel before executing",
+                        "default": False,
                     },
                 },
                 "required": ["code"],
@@ -336,7 +365,12 @@ def register_default_tools() -> None:
     registry.register(
         ToolDefinition(
             name="web_search",
-            description="Search the web for information on a given query.",
+            description=(
+                "Search the web and read matching pages. This tool performs URL recall, "
+                "deduplicates results, batch-crawls pages, extracts clean page text, "
+                "scores passages for relevance, and returns selected evidence snippets "
+                "with source URLs."
+            ),
             parameters={
                 "type": "object",
                 "properties": {
@@ -348,6 +382,26 @@ def register_default_tools() -> None:
                         "type": "integer",
                         "description": "Number of results to return",
                         "default": 5,
+                    },
+                    "max_time_ms": {
+                        "type": "integer",
+                        "description": "Overall search+crawl budget in milliseconds",
+                        "default": 15000,
+                    },
+                    "max_content_length": {
+                        "type": "integer",
+                        "description": "Maximum total extracted text characters returned",
+                        "default": 8000,
+                    },
+                    "per_url_timeout_ms": {
+                        "type": "integer",
+                        "description": "Per-page crawl timeout in milliseconds",
+                        "default": 3000,
+                    },
+                    "max_per_url": {
+                        "type": "integer",
+                        "description": "Maximum extracted characters per page",
+                        "default": 5000,
                     },
                 },
                 "required": ["query"],
