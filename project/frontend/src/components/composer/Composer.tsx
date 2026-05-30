@@ -47,7 +47,7 @@ export function Composer({ className }: ComposerProps) {
         className
       )}
     >
-      <div className="max-w-3xl mx-auto">
+      <div className="max-w-5xl mx-auto">
         {/* Toolbar */}
         <div className="flex items-center gap-1 mb-2">
           <ModelSelector />

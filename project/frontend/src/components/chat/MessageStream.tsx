@@ -116,14 +116,16 @@ export function MessageStream({ className }: MessageStreamProps) {
         onScroll={handleScroll}
         className={cn(
           'flex-1 overflow-y-auto overflow-x-hidden scroll-smooth',
-          'py-4 space-y-1',
+          'py-4',
           className
         )}
       >
-        {messages.map((msg: Message) => (
-          <MessageBubble key={msg.id} message={msg} />
-        ))}
-        <div ref={bottomRef} className="h-2" />
+        <div className="max-w-5xl mx-auto w-full space-y-1">
+          {messages.map((msg: Message) => (
+            <MessageBubble key={msg.id} message={msg} />
+          ))}
+          <div ref={bottomRef} className="h-2" />
+        </div>
       </div>
 
       {/* Scroll to bottom button */}
