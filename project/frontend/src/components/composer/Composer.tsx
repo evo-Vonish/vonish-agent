@@ -40,7 +40,10 @@ export function Composer({ className }: ComposerProps) {
         const data = await response.json();
         setText(data.polished || trimmed);
       }
-    } catch {} finally { setPolishing(false); }
+    } catch {} finally {
+      await new Promise((r) => setTimeout(r, 400));
+      setPolishing(false);
+    }
   };
 
   const handleRevert = () => {
@@ -119,7 +122,7 @@ export function Composer({ className }: ComposerProps) {
             <Mic className="w-4 h-4" />
           </button>
           {polishing ? (
-            <button className="p-1.5 rounded-md text-warning animate-pulse ml-auto" disabled>
+            <button className="p-1.5 rounded-md text-foreground-muted ml-auto" disabled>
               <Sparkles className="w-4 h-4 animate-spin" />
             </button>
           ) : originalText ? (
@@ -156,7 +159,7 @@ export function Composer({ className }: ComposerProps) {
             onKeyDown={handleKeyDown}
             placeholder={isStreaming ? t('chat.streaming.placeholder') : `${t('chat.input.placeholder')} (${t('chat.ctrlEnter')})`}
             rows={1}
-            disabled={isStreaming}
+            disabled={isStreaming || polishing}
             className="flex-1 bg-transparent text-sm text-foreground placeholder:text-foreground-subtle resize-none outline-none py-1 disabled:opacity-50 transition-[height] duration-200 ease-out overflow-y-auto"
             style={{ height: 'auto' }}
           />
