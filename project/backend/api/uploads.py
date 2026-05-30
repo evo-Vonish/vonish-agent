@@ -15,9 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import User, get_current_user
 from core.logging import get_logger
-from core.security import validate_file_size, validate_mime_type
 from db.session import get_db
-from services.upload_service import get_upload_service
+from services.upload_service import MAX_CONTEXT_PER_BATCH, get_upload_service
 
 logger = get_logger(__name__)
 
@@ -71,48 +70,59 @@ async def upload_files(
 
     uploaded: list[dict[str, Any]] = []
     failed: list[dict[str, Any]] = []
+    buffered: list[tuple[UploadFile, bytes]] = []
 
     for upload_file in files:
         try:
-            # Read file data
             file_data = await upload_file.read()
+            buffered.append((upload_file, file_data))
+        except Exception as e:
+            failed.append({"file_name": upload_file.filename or "unknown", "error": str(e)})
 
-            # Validate
-            if not validate_file_size(len(file_data)):
-                failed.append(
-                    {
-                        "file_name": upload_file.filename or "unknown",
-                        "error": f"File size {len(file_data)} exceeds 50MB limit",
-                    }
-                )
-                continue
+    try:
+        service.validate_batch_specs(
+            [(upload_file.filename or "unknown", len(file_data)) for upload_file, file_data in buffered]
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
+    context_used = 0
+
+    for upload_file, file_data in buffered:
+        try:
             mime_type = upload_file.content_type or "application/octet-stream"
-            if not validate_mime_type(mime_type):
-                failed.append(
-                    {
-                        "file_name": upload_file.filename or "unknown",
-                        "error": f"MIME type '{mime_type}' not allowed",
-                    }
-                )
-                continue
-
-            # Upload
             result = await service.upload_file(
                 conversation_id=conversation_id,
                 file_name=upload_file.filename or "unnamed",
                 file_data=file_data,
                 mime_type=mime_type,
             )
+            result_dict = result.to_dict()
+            context_text = str(result_dict.get("contextText") or "")
+            if context_text:
+                remaining = max(0, MAX_CONTEXT_PER_BATCH - context_used)
+                result_dict["contextText"] = context_text[:remaining]
+                context_used += len(result_dict["contextText"])
 
-            uploaded.append(result.to_dict())
+            uploaded.append(result_dict)
+
+            try:
+                from context.workspace_context import get_workspace_context
+
+                get_workspace_context().touch_file(
+                    conversation_id,
+                    result.workspace_path,
+                    source="upload",
+                )
+            except Exception as ctx_error:
+                logger.warning(f"Failed to touch uploaded file context: {ctx_error}")
 
             logger.info(
-                f"Uploaded file: {result.file_name}",
+                f"Uploaded file: {result.original_name}",
                 extra={
                     "conversation_id": conversation_id,
                     "file_id": result.file_id,
-                    "size": result.file_size,
+                    "size": result.size,
                 },
             )
 

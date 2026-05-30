@@ -83,11 +83,22 @@ class FileParser:
         try:
             if ext == ".pdf" or mime_type == "application/pdf":
                 return await self._parse_pdf(path)
-            elif ext in (".docx", ".doc") or mime_type in (
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                "application/msword",
-            ):
+            elif ext == ".doc" or mime_type == "application/msword":
+                return ParseResult(
+                    success=False,
+                    error="Legacy .doc parsing is not supported yet. The file was saved to workspace.",
+                    metadata={"format": "doc"},
+                )
+            elif ext == ".docx" or mime_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
                 return await self._parse_docx(path)
+            elif ext == ".ppt" or mime_type == "application/vnd.ms-powerpoint":
+                return ParseResult(
+                    success=False,
+                    error="Legacy .ppt parsing is not supported yet. The file was saved to workspace.",
+                    metadata={"format": "ppt"},
+                )
+            elif ext == ".pptx" or mime_type == "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+                return await self._parse_pptx(path)
             elif ext == ".csv" or mime_type == "text/csv":
                 return await self._parse_csv(path)
             elif ext in (".html", ".htm") or mime_type == "text/html":
@@ -118,7 +129,14 @@ class FileParser:
 
             doc.close()
 
-            full_text = "\n".join(text_parts)
+            full_text = "\n".join(text_parts).strip()
+            if not full_text:
+                return ParseResult(
+                    success=False,
+                    error="No extractable text layer detected in PDF.",
+                    page_count=total_pages,
+                    metadata={"format": "pdf", "pages": total_pages},
+                )
             word_count = len(full_text.split())
 
             return ParseResult(
@@ -158,6 +176,46 @@ class FileParser:
             return ParseResult(
                 success=False,
                 error="python-docx not available for DOCX parsing",
+            )
+
+    async def _parse_pptx(self, path: Path) -> ParseResult:
+        """Parse PPTX file using python-pptx."""
+        try:
+            from pptx import Presentation
+
+            presentation = Presentation(str(path))
+            slide_texts: list[str] = []
+
+            for index, slide in enumerate(presentation.slides, start=1):
+                parts: list[str] = []
+                for shape in slide.shapes:
+                    text = getattr(shape, "text", "")
+                    if text and text.strip():
+                        parts.append(text.strip())
+                if parts:
+                    slide_texts.append(f"[Slide {index}]\n" + "\n".join(parts))
+
+            full_text = "\n\n".join(slide_texts).strip()
+            if not full_text:
+                return ParseResult(
+                    success=False,
+                    error="No extractable slide text detected in PPTX.",
+                    page_count=len(presentation.slides),
+                    metadata={"format": "pptx", "slides": len(presentation.slides)},
+                )
+
+            return ParseResult(
+                success=True,
+                text=full_text[: self._max_text_length],
+                word_count=len(full_text.split()),
+                page_count=len(presentation.slides),
+                metadata={"format": "pptx", "slides": len(presentation.slides)},
+            )
+
+        except ImportError:
+            return ParseResult(
+                success=False,
+                error="python-pptx not available for PPTX parsing",
             )
 
     async def _parse_csv(self, path: Path) -> ParseResult:
@@ -231,19 +289,25 @@ class FileParser:
 
     async def _parse_text(self, path: Path) -> ParseResult:
         """Parse plain text file."""
-        try:
-            with open(path, "r", encoding="utf-8", errors="replace") as f:
-                text = f.read()
+        last_error: Exception | None = None
+        for encoding in ("utf-8", "utf-8-sig", "gbk", "gb18030"):
+            try:
+                text = path.read_text(encoding=encoding)
 
-            return ParseResult(
-                success=True,
-                text=text[: self._max_text_length],
-                word_count=len(text.split()),
-                metadata={"format": "text", "extension": path.suffix},
-            )
+                return ParseResult(
+                    success=True,
+                    text=text[: self._max_text_length],
+                    word_count=len(text.split()),
+                    metadata={"format": "text", "extension": path.suffix, "encoding": encoding},
+                )
 
-        except Exception as e:
-            return ParseResult(success=False, error=f"Text parse error: {e}")
+            except UnicodeDecodeError as e:
+                last_error = e
+                continue
+            except Exception as e:
+                return ParseResult(success=False, error=f"Text parse error: {e}")
+
+        return ParseResult(success=False, error=f"Text decode error: {last_error}")
 
     async def parse_from_bytes(
         self, file_name: str, file_data: bytes, mime_type: str = ""

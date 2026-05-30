@@ -1,13 +1,13 @@
-import { Bot, Sparkles, User } from 'lucide-react';
+import { Bot, FileText, Image, Sparkles, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { Message, MessageSegment } from '@/types';
+import { formatBytes } from '@/lib/utils';
+import type { Message, MessageSegment, UploadedFileMeta } from '@/types';
 import { useI18n } from '@/i18n';
 import { useChatStore } from '@/stores/chatStore';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { ThinkingCard } from './ThinkingCard';
 import { ToolCard } from './ToolCard';
 import { TodoCard } from './TodoCard';
-import { InteractionCard } from './InteractionCard';
 
 interface MessageBubbleProps {
   message: Message;
@@ -41,14 +41,49 @@ function SegmentRenderer({ segment }: { segment: MessageSegment }) {
   return <AssistantTextBlock content={segment.content} />;
 }
 
+function FileIcon({ file }: { file: UploadedFileMeta }) {
+  if (file.mimeType?.startsWith('image/')) return <Image className="h-3.5 w-3.5 text-primary" />;
+  return <FileText className="h-3.5 w-3.5 text-foreground-subtle" />;
+}
+
+function FileCard({ file, conversationId }: { file: UploadedFileMeta; conversationId: string | null }) {
+  const canOpen = Boolean(conversationId && file.workspacePath);
+  const openFile = () => {
+    if (!canOpen) return;
+    window.open(`/api/workspaces/${conversationId}/files/${file.workspacePath}`, '_blank', 'noopener,noreferrer');
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={openFile}
+      disabled={!canOpen}
+      className={cn(
+        'flex max-w-[220px] items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-xs transition-colors',
+        file.status === 'failed'
+          ? 'border-error/30 bg-error/10 text-error'
+          : 'border-border bg-background/80 text-foreground hover:border-primary/30 hover:bg-surface-hover',
+        !canOpen && 'cursor-default',
+      )}
+    >
+      <FileIcon file={file} />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-medium">{file.originalName}</span>
+        <span className="block truncate text-[10px] text-foreground-subtle">
+          {file.status === 'failed' ? file.error || '解析失败' : `${file.ext || 'file'} · ${formatBytes(file.size)}`}
+        </span>
+      </span>
+    </button>
+  );
+}
+
 export function MessageBubble({ message, className }: MessageBubbleProps) {
   const isUser = message.role === 'user';
   const isAssistant = message.role === 'assistant';
   const hasContent = message.content && message.content.length > 0;
   const hasSegments = Boolean(message.segments?.length);
   const { t } = useI18n();
-  const respondToInteraction = useChatStore((s) => s.respondToInteraction);
-  const conversationId = useChatStore((s) => s.currentConversationId);
+  const conversationId = useChatStore((state) => state.currentConversationId);
 
   return (
     <div
@@ -88,6 +123,14 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
           </div>
         )}
 
+        {isUser && message.files && message.files.length > 0 && (
+          <div className="mb-2 flex max-w-full flex-wrap justify-end gap-2">
+            {message.files.map((file) => (
+              <FileCard key={file.id} file={file} conversationId={conversationId} />
+            ))}
+          </div>
+        )}
+
         {isAssistant && hasSegments && (
           <div className="space-y-2 w-full">
             {message.segments?.map((segment) => (
@@ -113,26 +156,6 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
             {/* Todo Card */}
             {message.todo && message.todo.items && message.todo.items.length > 0 && (
               <TodoCard items={message.todo.items as any} count={message.todo.count} />
-            )}
-
-            {/* Interaction Card */}
-            {message.interaction && message.interaction.interaction_id && (
-              <InteractionCard
-                payload={{
-                  interaction_id: message.interaction.interaction_id,
-                  type: message.interaction.type,
-                  title: message.interaction.title,
-                  description: message.interaction.description,
-                  options: message.interaction.options,
-                  allow_custom_response: message.interaction.allow_custom_response,
-                  risk_level: message.interaction.risk_level,
-                  plan: message.interaction.plan,
-                }}
-                conversationId={conversationId ?? ''}
-                onRespond={respondToInteraction}
-                resolved={message.interaction.resolved}
-                resolvedChoice={message.interaction.response?.choice}
-              />
             )}
 
             {message.toolCalls && message.toolCalls.length > 0 && (

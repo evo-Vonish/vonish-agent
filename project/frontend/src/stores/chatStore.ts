@@ -7,6 +7,7 @@ import type {
   ContextUsage,
   ToolCall,
   MessageSegment,
+  UploadedFileMeta,
 } from '@/types';
 import { mockContextProfile, contextProfiles } from '@/services/mockData';
 import {
@@ -20,10 +21,51 @@ import {
   summarizeConversationTitle,
   summarizeThinking,
   getContextUsage,
+  uploadConversationFiles,
 } from '@/services/api';
 import { generateId } from '@/lib/utils';
 import { useWorkspaceStore } from './workspaceStore';
 import { useToolStore } from './useToolStore';
+
+type InteractiveToolType = 'ask_user_question' | 'request_approval';
+
+const MAX_ATTACHMENTS = 10;
+const MAX_ATTACHMENT_SIZE = 20 * 1024 * 1024;
+const MAX_TOTAL_ATTACHMENT_SIZE = 50 * 1024 * 1024;
+const ALLOWED_ATTACHMENT_EXTENSIONS = new Set([
+  'txt',
+  'md',
+  'markdown',
+  'pdf',
+  'doc',
+  'docx',
+  'ppt',
+  'pptx',
+  'jpg',
+  'jpeg',
+  'png',
+  'webp',
+  'gif',
+]);
+
+interface PendingInteractionOption {
+  id: string;
+  label: string;
+  description?: string;
+}
+
+interface PendingInteraction {
+  type: InteractiveToolType;
+  toolCallId: string;
+  interactionId: string;
+  title?: string;
+  message: string;
+  options?: string[];
+  optionItems?: PendingInteractionOption[];
+  allowCustom?: boolean;
+  riskLevel?: 'low' | 'medium' | 'high';
+  plan?: { id: string; title: string; description?: string; risk?: string }[];
+}
 
 interface ChatState {
   conversations: Conversation[];
@@ -41,6 +83,7 @@ interface ChatState {
   apiError: string | null;
   initialized: boolean;
   _abortController: AbortController | null;
+  pendingInteraction: PendingInteraction | null;
 
   initialize: () => Promise<void>;
   setInputText: (text: string) => void;
@@ -61,6 +104,7 @@ interface ChatState {
   removeAttachment: (id: string) => void;
   clearAttachments: () => void;
   setSuggestions: (suggestions: string[]) => void;
+  clearApiError: () => void;
   clearMessages: () => void;
 }
 
@@ -115,6 +159,101 @@ function compactPhrase(content: string): string {
   return sentence.length > 18 ? `${sentence.slice(0, 18)}...` : sentence;
 }
 
+function queuedFileMeta(attachment: { id: string; file: File; uploading: boolean }): UploadedFileMeta {
+  const ext = attachment.file.name.includes('.')
+    ? attachment.file.name.split('.').pop()?.toLowerCase() || ''
+    : '';
+  return {
+    id: attachment.id,
+    originalName: attachment.file.name,
+    mimeType: attachment.file.type || 'application/octet-stream',
+    ext,
+    size: attachment.file.size,
+    workspacePath: '',
+    status: attachment.uploading ? 'uploading' : 'queued',
+  };
+}
+
+function validateAttachment(file: File, existing: { file: File }[]): string | null {
+  const ext = file.name.includes('.') ? file.name.split('.').pop()?.toLowerCase() || '' : '';
+  if (!ALLOWED_ATTACHMENT_EXTENSIONS.has(ext)) {
+    return `不支持的文件类型：${file.name}`;
+  }
+  if (file.size > MAX_ATTACHMENT_SIZE) {
+    return `文件过大：${file.name}`;
+  }
+  if (existing.length >= MAX_ATTACHMENTS) {
+    return `单次最多上传 ${MAX_ATTACHMENTS} 个文件`;
+  }
+  const total = existing.reduce((sum, item) => sum + item.file.size, 0) + file.size;
+  if (total > MAX_TOTAL_ATTACHMENT_SIZE) {
+    return '文件总大小超过 50MB';
+  }
+  return null;
+}
+
+function isInteractiveToolName(toolName: string): toolName is InteractiveToolType {
+  return toolName === 'ask_user_question' || toolName === 'request_approval';
+}
+
+function normalizeInteractionOptions(raw: unknown): PendingInteractionOption[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((option, index) => {
+      if (typeof option === 'string') {
+        return { id: option, label: option };
+      }
+      if (option && typeof option === 'object') {
+        const source = option as Record<string, unknown>;
+        const label = String(source.label ?? source.id ?? `Option ${index + 1}`);
+        return {
+          id: String(source.id ?? label),
+          label,
+          description: source.description ? String(source.description) : undefined,
+        };
+      }
+      return null;
+    })
+    .filter((option): option is PendingInteractionOption => Boolean(option));
+}
+
+function normalizePendingInteraction(
+  raw: Record<string, unknown>,
+  toolCallId = '',
+): PendingInteraction | null {
+  const interaction =
+    raw.interaction && typeof raw.interaction === 'object'
+      ? (raw.interaction as Record<string, unknown>)
+      : raw;
+  const payload =
+    interaction.payload && typeof interaction.payload === 'object'
+      ? (interaction.payload as Record<string, unknown>)
+      : {};
+  const type = String(interaction.type ?? raw.type ?? '');
+  if (!isInteractiveToolName(type)) return null;
+
+  const optionItems = normalizeInteractionOptions(interaction.options ?? payload.options);
+  const plan = Array.isArray(interaction.plan)
+    ? interaction.plan
+    : Array.isArray(payload.plan)
+      ? payload.plan
+      : undefined;
+  const risk = String(interaction.risk_level ?? payload.risk_level ?? 'medium');
+
+  return {
+    type,
+    toolCallId,
+    interactionId: String(interaction.id ?? interaction.interaction_id ?? raw.interaction_id ?? toolCallId),
+    title: interaction.title ? String(interaction.title) : undefined,
+    message: String(interaction.description ?? interaction.message ?? raw.description ?? raw.message ?? ''),
+    options: optionItems.map((option) => option.label),
+    optionItems,
+    allowCustom: Boolean(interaction.allow_custom_response ?? payload.allow_custom_response ?? true),
+    riskLevel: risk === 'low' || risk === 'medium' || risk === 'high' ? risk : 'medium',
+    plan: Array.isArray(plan) ? (plan as PendingInteraction['plan']) : undefined,
+  };
+}
+
 function updateSegment(
   segments: MessageSegment[] | undefined,
   segmentId: string,
@@ -123,6 +262,96 @@ function updateSegment(
   return (segments ?? []).map((segment) =>
     segment.id === segmentId ? updater(segment) : segment,
   );
+}
+
+function optionalNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
+function normalizeToolCall(raw: unknown): ToolCall {
+  const source = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const rawStatus = String(source.status ?? '');
+  const status: ToolCall['status'] =
+    rawStatus === 'pending' ||
+    rawStatus === 'running' ||
+    rawStatus === 'success' ||
+    rawStatus === 'error'
+      ? rawStatus
+      : 'pending';
+  const args =
+    source.arguments && typeof source.arguments === 'object' && !Array.isArray(source.arguments)
+      ? (source.arguments as Record<string, unknown>)
+      : {};
+  const tool: ToolCall = {
+    id: String(source.id || generateId()),
+    name: String(source.name || ''),
+    arguments: args,
+    status,
+  };
+  if ('result' in source) tool.result = source.result;
+  if (source.error !== undefined && source.error !== null) tool.error = String(source.error);
+  const duration = optionalNumber(source.duration);
+  if (duration !== undefined) tool.duration = duration;
+  const startTime = optionalNumber(source.startTime);
+  if (startTime !== undefined) tool.startTime = startTime;
+  return tool;
+}
+
+function normalizeAssistantSegments(
+  rawSegments: MessageSegment[] | null | undefined,
+  thinking: string | null | undefined,
+  content: string,
+): MessageSegment[] {
+  if (Array.isArray(rawSegments) && rawSegments.length > 0) {
+    const normalized: MessageSegment[] = [];
+    rawSegments.forEach((segment, index) => {
+      const source = segment as unknown as Record<string, unknown>;
+      if (source.type === 'thinking') {
+        const text = String(source.content ?? '');
+        normalized.push({
+          id: String(source.id || `thinking-${index}`),
+          type: 'thinking',
+          content: text,
+          summary: source.summary ? String(source.summary) : compactPhrase(text),
+          status: 'complete',
+        });
+      } else if (source.type === 'text') {
+        normalized.push({
+          id: String(source.id || `text-${index}`),
+          type: 'text',
+          content: String(source.content ?? ''),
+        });
+      } else if (source.type === 'tool') {
+        const tool = normalizeToolCall(source.tool);
+        normalized.push({
+          id: String(source.id || `tool-${tool.id}`),
+          type: 'tool',
+          tool,
+        });
+      }
+    });
+    return normalized;
+  }
+
+  return [
+    ...(thinking
+      ? [
+          {
+            id: generateId(),
+            type: 'thinking' as const,
+            content: thinking,
+            summary: compactPhrase(thinking),
+            status: 'complete' as const,
+          },
+        ]
+      : []),
+    ...(content ? [{ id: generateId(), type: 'text' as const, content }] : []),
+  ];
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -141,6 +370,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   apiError: null,
   initialized: false,
   _abortController: null,
+  pendingInteraction: null,
 
   initialize: async () => {
     if (get().initialized) return;
@@ -214,17 +444,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   sendMessage: async (content) => {
     if (get().isStreaming) return;
+    const attachmentSnapshot = get().attachments;
+    const hasAttachments = attachmentSnapshot.length > 0;
+    const trimmedContent = content.trim();
+    if (!trimmedContent && !hasAttachments) return;
 
     let conversationId = get().currentConversationId;
     if (!conversationId) {
-      conversationId = await get().createConversation(firstLineTitle(content));
+      conversationId = await get().createConversation(
+        firstLineTitle(trimmedContent || attachmentSnapshot[0]?.file.name || 'File upload'),
+      );
     }
 
     const userMsg: Message = {
       id: generateId(),
       role: 'user',
-      content,
+      content: trimmedContent,
       type: 'text',
+      files: attachmentSnapshot.map(queuedFileMeta),
       timestamp: Date.now(),
       status: 'complete',
     };
@@ -233,19 +470,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const assistantMsg: Message = {
       id: generateId(),
       role: 'assistant',
-      content: '',
+      content: hasAttachments ? `正在处理文件：共 ${attachmentSnapshot.length} 个` : '',
       type: 'text',
       timestamp: Date.now(),
       status: 'streaming',
     };
     get().addMessage(assistantMsg);
     const abort = new AbortController();
-    set({ isStreaming: true, apiError: null, _abortController: abort });
+    set({ isStreaming: true, apiError: null, pendingInteraction: null, _abortController: abort });
 
     const currentMsgId = assistantMsg.id;
     const selectedModelForRequest = get().selectedModelId;
     let activeThinkingSegmentId: string | null = null;
     let activeTextSegmentId: string | null = null;
+    let showingFileProcessing = hasAttachments;
+    let completedSend = false;
 
     const appendSegment = (segment: MessageSegment) => {
       const current = get().messages.find((m) => m.id === currentMsgId);
@@ -265,12 +504,35 @@ export const useChatStore = create<ChatState>((set, get) => ({
     };
 
     try {
+      let uploadedFiles: UploadedFileMeta[] = [];
+      if (hasAttachments) {
+        set((state) => ({
+          attachments: state.attachments.map((attachment) => ({ ...attachment, uploading: true })),
+        }));
+        const uploadResult = await uploadConversationFiles(
+          conversationId,
+          attachmentSnapshot.map((attachment) => attachment.file),
+        );
+        uploadedFiles = [
+          ...uploadResult.uploaded,
+          ...(uploadResult.failed ?? []).map((file) => ({ ...file, status: 'failed' as const })),
+        ];
+        get().updateMessage(userMsg.id, { files: uploadedFiles });
+        useWorkspaceStore.getState().loadWorkspace(conversationId);
+      }
+
       await streamChat(
         conversationId,
-        content,
+        trimmedContent,
         selectedModelForRequest,
+        get().contextProfile.id,
+        uploadedFiles,
         ({ event, data }) => {
           if (abort.signal.aborted) return;
+          if (showingFileProcessing && event !== 'message_start') {
+            showingFileProcessing = false;
+            get().updateMessage(currentMsgId, { content: '' });
+          }
           if (event === 'thinking_start') {
             activeThinkingSegmentId = generateId();
             activeTextSegmentId = null;
@@ -356,6 +618,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           if (event === 'tool_call_start') {
             const callId = String(data.call_id ?? '');
             const toolName = String(data.tool ?? '');
+            if (isInteractiveToolName(toolName)) {
+              return;
+            }
             const args =
               data.arguments && typeof data.arguments === 'object'
                 ? (data.arguments as Record<string, unknown>)
@@ -383,21 +648,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
 
           if (event === 'interaction_required') {
-            const payload = data as any;
-            const current = get().messages.find((m) => m.id === currentMsgId);
-            get().updateMessage(currentMsgId, {
-              type: 'interaction',
-              interaction: {
-                interaction_id: String(payload.interaction_id ?? ''),
-                type: String(payload.type ?? '') as 'ask_user_question' | 'request_approval',
-                title: String(payload.title ?? ''),
-                description: payload.description ? String(payload.description) : undefined,
-                options: Array.isArray(payload.options) ? payload.options : [],
-                plan: Array.isArray(payload.payload?.plan) ? payload.payload.plan : undefined,
-                allow_custom_response: payload.payload?.allow_custom_response ?? true,
-                risk_level: payload.payload?.risk_level ?? 'medium',
-              },
-            });
+            const pending = normalizePendingInteraction(data);
+            if (pending) set({ pendingInteraction: pending });
             return;
           }
 
@@ -413,25 +665,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
 
           if (event === 'agent_resumed') {
-            const choice = String(data.choice ?? '');
-            const message = data.message ? String(data.message) : undefined;
-            const current = get().messages.find((m) => m.id === currentMsgId);
-            if (current?.interaction) {
-              get().updateMessage(currentMsgId, {
-                interaction: {
-                  ...current.interaction,
-                  resolved: true,
-                  response: { choice, message },
-                },
-              });
-            }
+            set({ pendingInteraction: null });
             return;
           }
 
           if (event === 'tool_result') {
             const callId = String(data.call_id ?? '');
+            const toolName = String(data.tool ?? '');
             const success = Boolean(data.success);
             const result = data.result ?? null;
+            if (success && isInteractiveToolName(toolName) && result && typeof result === 'object') {
+              const pending = normalizePendingInteraction(result as Record<string, unknown>, callId);
+              if (pending) {
+                set({ pendingInteraction: pending });
+              }
+              return;
+            }
             const error = data.error ? String(data.error) : undefined;
             const duration = Number(data.duration_ms ?? 0);
             const current = get().messages.find((m) => m.id === currentMsgId);
@@ -477,6 +726,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
           if (event === 'error') {
             const detail = String(data.detail ?? 'Unknown API error');
+            console.error('Chat stream returned error event', data);
             const current = get().messages.find((m) => m.id === currentMsgId);
             get().updateMessage(currentMsgId, {
               content: detail,
@@ -550,6 +800,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           })
           .catch(() => {});
       }
+      completedSend = true;
     } catch (error) {
       // AbortError is expected on user-triggered stop — not a real error
       if (error instanceof DOMException && error.name === 'AbortError') {
@@ -559,6 +810,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         });
       } else {
         const detail = error instanceof Error ? error.message : String(error);
+        console.error('Chat stream failed', error);
         const current = get().messages.find((m) => m.id === currentMsgId);
         get().updateMessage(currentMsgId, {
           content: detail,
@@ -572,7 +824,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
         set({ apiError: detail });
       }
     } finally {
-      set({ isStreaming: false, _abortController: null });
+      set((state) => ({
+        isStreaming: false,
+        _abortController: null,
+        attachments: completedSend ? [] : state.attachments.map((attachment) => ({ ...attachment, uploading: false })),
+      }));
     }
   },
 
@@ -590,52 +846,59 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   respondToInteraction: async (choice, message) => {
     const conversationId = get().currentConversationId;
-    const lastMsg = get().messages.filter(m => m.role === 'assistant' && m.interaction).pop();
-    if (!conversationId || !lastMsg?.interaction) return;
+    const pending = get().pendingInteraction;
+    if (!conversationId || !pending) return;
 
-    const interactionId = lastMsg.interaction.interaction_id;
-    await fetch(`/api/agent-runs/${conversationId}/interactions/${interactionId}/resume`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ choice, message: message || null }),
-    });
+    const interactionId = pending.interactionId || pending.toolCallId;
+    try {
+      const response = await fetch(`/api/agent-runs/${conversationId}/interactions/${interactionId}/resume`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ choice, message: message || null }),
+      });
+      if (!response.ok) {
+        const detail = await response.text().catch(() => '');
+        throw new Error(detail || `Failed to submit interaction: HTTP ${response.status}`);
+      }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      console.error('Interaction response failed', error);
+      set({ apiError: detail });
+      throw error;
+    }
   },
 
   selectConversation: async (id) => {
     const conversation = get().conversations.find((c) => c.id === id);
     if (!conversation) return;
 
-    set({ currentConversationId: id });
+    set({ currentConversationId: id, pendingInteraction: null });
 
     try {
       const result = await getConversationMessages(id);
       const messages: Message[] = result.messages.map((m) => {
         const role = m.role as 'user' | 'assistant';
-        const segments: MessageSegment[] =
+        const segments =
           role === 'assistant'
-            ? [
-                ...(m.thinking
-                  ? [
-                      {
-                        id: generateId(),
-                        type: 'thinking' as const,
-                        content: m.thinking,
-                        summary: compactPhrase(m.thinking),
-                        status: 'complete' as const,
-                      },
-                    ]
-                  : []),
-                ...(m.content
-                  ? [{ id: generateId(), type: 'text' as const, content: m.content }]
-                  : []),
-              ]
+            ? normalizeAssistantSegments(m.segments, m.thinking, m.content)
             : [];
+        const segmentToolCalls = segments
+          .filter((segment): segment is Extract<MessageSegment, { type: 'tool' }> =>
+            segment.type === 'tool',
+          )
+          .map((segment) => segment.tool);
+        const persistedToolCalls = Array.isArray(m.tool_calls)
+          ? m.tool_calls.map((tool) => normalizeToolCall(tool))
+          : [];
+        const toolCalls = segmentToolCalls.length ? segmentToolCalls : persistedToolCalls;
         return {
           id: generateId(),
           role,
           content: m.content,
           thinkingContent: m.thinking ?? undefined,
           segments: segments.length ? segments : undefined,
+          toolCalls: toolCalls.length ? toolCalls : undefined,
+          files: m.files ?? undefined,
           type: 'text',
           timestamp: Date.parse(m.timestamp) || Date.now(),
           status: 'complete' as const,
@@ -659,6 +922,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       currentConversationId: conversation.id,
       messages: [],
       apiError: null,
+      pendingInteraction: null,
     }));
     // Load workspace for the new conversation (will be empty initially)
     useWorkspaceStore.getState().loadWorkspace(conversation.id);
@@ -678,6 +942,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           conversations,
           currentConversationId: newId,
           messages: first?.messages ?? [],
+          pendingInteraction: null,
         };
       }
       return { conversations };
@@ -729,9 +994,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setIsStreaming: (v) => set({ isStreaming: v }),
 
   addAttachment: (file) =>
-    set((state) => ({
-      attachments: [...state.attachments, { id: generateId(), file, uploading: false }],
-    })),
+    set((state) => {
+      const error = validateAttachment(file, state.attachments);
+      if (error) {
+        return { apiError: error };
+      }
+      return {
+        attachments: [...state.attachments, { id: generateId(), file, uploading: false }],
+        apiError: null,
+      };
+    }),
 
   removeAttachment: (id) =>
     set((state) => ({
@@ -740,5 +1012,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   clearAttachments: () => set({ attachments: [] }),
   setSuggestions: (suggestions) => set({ suggestions }),
+  clearApiError: () => set({ apiError: null }),
   clearMessages: () => set({ messages: [] }),
 }));

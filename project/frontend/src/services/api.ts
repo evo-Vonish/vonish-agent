@@ -1,4 +1,4 @@
-import type { Conversation, Model } from '@/types';
+import type { Conversation, MessageSegment, Model, ToolCall, UploadedFileMeta } from '@/types';
 
 interface BackendConversation {
   id: string;
@@ -70,6 +70,29 @@ function modelDescription(model: BackendModel): string {
     model.supports_json_mode ? 'JSON' : '',
   ].filter(Boolean);
   return `${model.provider}${features.length ? ` · ${features.join(' · ')}` : ''}`;
+}
+
+function normalizeUploadedFile(raw: any): UploadedFileMeta {
+  const originalName = String(raw.originalName ?? raw.file_name ?? raw.fileName ?? 'unknown');
+  const ext = String(raw.ext ?? (originalName.includes('.') ? originalName.split('.').pop() : '') ?? '').toLowerCase();
+  return {
+    id: String(raw.id ?? raw.file_id ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`),
+    originalName,
+    safeName: raw.safeName ?? raw.safe_name,
+    mimeType: String(raw.mimeType ?? raw.mime_type ?? 'application/octet-stream'),
+    ext,
+    size: Number(raw.size ?? raw.file_size ?? 0),
+    workspacePath: String(raw.workspacePath ?? raw.workspace_path ?? ''),
+    createdAt: raw.createdAt ?? raw.created_at,
+    status: (raw.status ?? 'failed') as UploadedFileMeta['status'],
+    textExtracted: Boolean(raw.textExtracted ?? raw.text_extracted ?? false),
+    textLength: Number(raw.textLength ?? raw.text_length ?? 0),
+    textPreview: raw.textPreview ?? raw.text_preview,
+    contextPolicy: raw.contextPolicy ?? raw.context_policy,
+    contextText: raw.contextText ?? raw.context_text,
+    resourceUri: raw.resourceUri ?? raw.resource_uri,
+    error: raw.error,
+  };
 }
 
 export async function listModels(): Promise<Model[]> {
@@ -200,10 +223,29 @@ export async function summarizeThinking(
   return body.summary;
 }
 
+export async function polishText(
+  text: string,
+  model: string,
+): Promise<string> {
+  const response = await fetch('/api/polish', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, model }),
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to polish text: HTTP ${response.status}`);
+  }
+  const body = (await response.json()) as { polished: string; original: string };
+  return body.polished;
+}
+
 interface BackendMessage {
   role: string;
   content: string;
   thinking?: string | null;
+  segments?: MessageSegment[] | null;
+  tool_calls?: ToolCall[] | null;
+  files?: UploadedFileMeta[] | null;
   timestamp: string;
 }
 
@@ -262,10 +304,42 @@ export async function stopChat(conversationId: string): Promise<void> {
   });
 }
 
+export async function uploadConversationFiles(
+  conversationId: string,
+  files: File[],
+): Promise<{ uploaded: UploadedFileMeta[]; failed: UploadedFileMeta[]; total: number; successful: number }> {
+  const formData = new FormData();
+  files.forEach((file) => formData.append('files', file));
+
+  const response = await fetch(`/api/uploads/${conversationId}`, {
+    method: 'POST',
+    body: formData,
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new Error(detail || `File upload failed: HTTP ${response.status}`);
+  }
+
+  const body = (await response.json()) as {
+    uploaded: any[];
+    failed: any[];
+    total: number;
+    successful: number;
+  };
+  return {
+    uploaded: (body.uploaded ?? []).map(normalizeUploadedFile),
+    failed: (body.failed ?? []).map(normalizeUploadedFile),
+    total: body.total,
+    successful: body.successful,
+  };
+}
+
 export async function streamChat(
   conversationId: string,
   message: string,
   model: string,
+  contextProfile: string,
+  resources: UploadedFileMeta[],
   onEvent: (event: StreamEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -275,8 +349,19 @@ export async function streamChat(
     body: JSON.stringify({
       message,
       model,
+      context_profile: contextProfile,
       enable_thinking: true,
-      resources: [],
+      resources: resources.map((file) => ({
+        uri: file.resourceUri,
+        mime_type: file.mimeType,
+        title: file.originalName,
+        originalName: file.originalName,
+        workspacePath: file.workspacePath,
+        contextText: file.contextText,
+        contextPolicy: file.contextPolicy,
+        status: file.status,
+        error: file.error,
+      })),
     }),
     signal,
   });
@@ -483,8 +568,9 @@ export async function compactContext(
   conversationId: string,
   profileName = 'balanced',
   modelId = 'deepseek-chat',
+  level = 'medium',
 ): Promise<{ status: string; compression_level: string; tokens_saved: number; warnings: string[] }> {
-  const params = new URLSearchParams({ profile_name: profileName, model_id: modelId });
+  const params = new URLSearchParams({ profile_name: profileName, model_id: modelId, level });
   const response = await fetch(`/api/context/${conversationId}/compact?${params}`, {
     method: 'POST',
   });

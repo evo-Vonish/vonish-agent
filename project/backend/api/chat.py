@@ -34,8 +34,9 @@ router = APIRouter(prefix="/api")
 class ChatStreamRequest(BaseModel):
     """Request body for streaming chat."""
 
-    message: str = Field(..., description="User message text", min_length=1)
+    message: str = Field(default="", description="User message text")
     model: str = Field(default="deepseek-v4-pro", description="Model to use")
+    context_profile: str = Field(default="balanced", description="Context profile to use")
     enable_thinking: bool = Field(default=True, description="Enable thinking/reasoning")
     resources: list[dict[str, Any]] = Field(
         default_factory=list, description="Attached resource references"
@@ -98,16 +99,32 @@ async def chat_stream(
     )
 
     # Store user message to DB
+    import asyncio as _asyncio
     import json as _json
     import time as _time
     import uuid as _uuid
     from db.models import Message as MessageModel
 
     conv_uuid = _uuid.UUID(conversation_id) if conversation_id != "test" else _uuid.uuid4()
+    resource_refs: list[dict[str, Any]] = []
+    for raw_resource in request.resources:
+        if not isinstance(raw_resource, dict):
+            continue
+        resource = dict(raw_resource)
+        if "uri" not in resource and resource.get("resourceUri"):
+            resource["uri"] = resource.get("resourceUri")
+        if "mime_type" not in resource and resource.get("mimeType"):
+            resource["mime_type"] = resource.get("mimeType")
+        resource_refs.append(resource)
+
+    user_content: list[dict[str, Any]] = [{"type": "text", "text": request.message}]
+    if resource_refs:
+        user_content.append({"type": "files", "files": resource_refs})
+
     user_msg = MessageModel(
         conversation_id=conv_uuid,
         role="user",
-        content=[{"type": "text", "text": request.message}],
+        content=user_content,
         model=request.model,
     )
     db.add(user_msg)
@@ -278,63 +295,98 @@ async def chat_stream(
     async def event_generator():
         """Generate SSE events from the agent loop and collect response."""
         nonlocal assistant_parts, thinking_parts
-        async for event_str in agent_loop.run(
-            conversation_id=conversation_id,
-            user_input=request.message,
-            model_id=request.model,
-            enable_thinking=True,
-            api_key=api_config.api_key if api_config else None,
-            api_base=api_config.api_base if api_config else None,
-            resources=getattr(request, 'resources', None),
-        ):
-            event_name, event_data = _parse_sse_event(event_str)
-            if "text_delta" in event_str or "markdown_delta" in event_str:
+        queue: _asyncio.Queue[str | None] = _asyncio.Queue()
+
+        async def _produce_events() -> None:
+            try:
+                async for produced in agent_loop.run(
+                    conversation_id=conversation_id,
+                    user_input=request.message or "Please review the uploaded files.",
+                    model_id=request.model,
+                    enable_thinking=True,
+                    api_key=api_config.api_key if api_config else None,
+                    api_base=api_config.api_base if api_config else None,
+                    context_profile=request.context_profile,
+                    resources=resource_refs,
+                ):
+                    await queue.put(produced)
+            except Exception as exc:
+                logger.error(f"Chat stream producer failed: {exc}")
+                await queue.put(
+                    sse_event("error", {"detail": str(exc), "code": "STREAM_PRODUCER_ERROR"})
+                )
+            finally:
+                await queue.put(None)
+
+        producer = _asyncio.create_task(_produce_events())
+        try:
+            while True:
                 try:
-                    _lines = event_str.strip().split("\n")
-                    filtered_lines: list[str] = []
-                    for _line in _lines:
-                        if _line.startswith("data:"):
-                            _data = _json.loads(_line[5:].strip())
-                            _content = _data.get("content", "")
-                            if _content:
-                                filtered = _filter_text_chunk(str(_content))
-                                if filtered:
-                                    assistant_parts.append(filtered)
-                                    _append_text_delta(filtered)
-                                if filtered or not _content:
-                                    new_data = _json.dumps({"content": filtered}, ensure_ascii=False)
-                                    filtered_lines.append(f"data: {new_data}")
-                                else:
+                    event_str = await _asyncio.wait_for(queue.get(), timeout=15.0)
+                except _asyncio.TimeoutError:
+                    # Keep the browser fetch stream alive while the model is
+                    # thinking or a long-running tool is executing.
+                    yield ": keepalive\n\n"
+                    continue
+
+                if event_str is None:
+                    break
+
+                event_name, event_data = _parse_sse_event(event_str)
+                if "text_delta" in event_str or "markdown_delta" in event_str:
+                    try:
+                        _lines = event_str.strip().split("\n")
+                        filtered_lines: list[str] = []
+                        for _line in _lines:
+                            if _line.startswith("data:"):
+                                _data = _json.loads(_line[5:].strip())
+                                _content = _data.get("content", "")
+                                if _content:
+                                    filtered = _filter_text_chunk(str(_content))
+                                    if filtered:
+                                        assistant_parts.append(filtered)
+                                        _append_text_delta(filtered)
+                                    if filtered or not _content:
+                                        new_data = _json.dumps({"content": filtered}, ensure_ascii=False)
+                                        filtered_lines.append(f"data: {new_data}")
+                                    else:
                                     # Suppressed entirely — skip this line
-                                    filtered_lines.append(f"data: {_json.dumps({'content': ''})}")
+                                        filtered_lines.append(f"data: {_json.dumps({'content': ''})}")
+                                else:
+                                    filtered_lines.append(_line)
                             else:
                                 filtered_lines.append(_line)
-                        else:
-                            filtered_lines.append(_line)
-                    yield "\n".join(filtered_lines) + "\n\n"
-                except Exception:
-                    yield event_str
-                continue
-            if event_name == "thinking_start":
-                _append_thinking_delta("")
-            elif event_name == "thinking_delta":
+                        yield "\n".join(filtered_lines) + "\n\n"
+                    except Exception:
+                        yield event_str
+                    continue
+                if event_name == "thinking_start":
+                    _append_thinking_delta("")
+                elif event_name == "thinking_delta":
+                    try:
+                        _content = event_data.get("content", "")
+                        if _content:
+                            delta = str(_content)
+                            thinking_parts.append(delta)
+                            _append_thinking_delta(delta)
+                    except Exception:
+                        pass
+                elif event_name == "thinking_end":
+                    _finish_thinking()
+                elif event_name == "tool_call_start":
+                    _start_tool_call(event_data)
+                elif event_name == "tool_result":
+                    _finish_tool_call(event_data)
+                elif event_name in {"message_end", "aborted", "error"}:
+                    _finish_thinking()
+                yield event_str
+        finally:
+            if not producer.done():
+                producer.cancel()
                 try:
-                    _content = event_data.get("content", "")
-                    if _content:
-                        delta = str(_content)
-                        thinking_parts.append(delta)
-                        _append_thinking_delta(delta)
-                except Exception:
+                    await producer
+                except _asyncio.CancelledError:
                     pass
-            elif event_name == "thinking_end":
-                _finish_thinking()
-            elif event_name == "tool_call_start":
-                _start_tool_call(event_data)
-            elif event_name == "tool_result":
-                _finish_tool_call(event_data)
-            elif event_name in {"message_end", "aborted", "error"}:
-                _finish_thinking()
-            yield event_str
 
         # After streaming ends, store assistant response to DB
         _finish_thinking()
@@ -456,8 +508,8 @@ async def resume_interaction(
 # ── Polish Text ─────────────────────────────────────────────────────────────
 
 class PolishRequest(BaseModel):
-    text: str = Field(..., description="Text to polish")
-    model: str = Field(default="deepseek-chat")
+    text: str = Field(..., description="Text to polish", min_length=1)
+    model: str = Field(default="deepseek-v4-pro")
 
 
 @router.post("/polish")
@@ -468,14 +520,22 @@ async def polish_text(
 ):
     """Polish user input: fix grammar, improve clarity, keep meaning intact."""
     try:
-        import openai
+        import httpx
 
-        config = await get_default_api_config(db, user.id, request.model)
-        client = openai.AsyncOpenAI(api_key=config.api_key, base_url=config.api_base)
+        provider = MODEL_CONFIGS.get(request.model).provider if request.model in MODEL_CONFIGS else ""
+        if provider not in ("deepseek", "kimi"):
+            raise ValueError(f"Unsupported polish model: {request.model}")
 
-        response = await client.chat.completions.create(
-            model=request.model,
-            messages=[
+        config = await get_default_api_config(db, user.id, provider)
+        if not config or not config.api_key:
+            raise ValueError(f"No API configuration found for provider: {provider}")
+
+        body: dict[str, Any] = {
+            "model": {
+                "kimi-k2-6": "kimi-k2.6",
+                "kimi-k2-5": "kimi-k2.5",
+            }.get(request.model, request.model),
+            "messages": [
                 {
                     "role": "user",
                     "content": (
@@ -487,12 +547,38 @@ async def polish_text(
                     ),
                 }
             ],
-            max_tokens=500,
-            temperature=0.3,
+            "max_tokens": 500,
+            "temperature": 0.3,
+            "stream": False,
+        }
+        if provider == "deepseek":
+            body["thinking"] = {"type": "enabled", "reasoning_effort": "max"}
+        elif provider == "kimi":
+            body["thinking"] = {"type": "enabled"}
+
+        async with httpx.AsyncClient(timeout=60.0, trust_env=False) as client:
+            response = await client.post(
+                f"{config.api_base.rstrip('/')}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {config.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=body,
+            )
+        if response.status_code >= 400:
+            raise ValueError(f"Provider HTTP {response.status_code}: {response.text[:500]}")
+
+        payload = response.json()
+        polished = (
+            payload.get("choices", [{}])[0]
+            .get("message", {})
+            .get("content", "")
+            .strip()
         )
-        polished = response.choices[0].message.content.strip()
+        if not polished:
+            raise ValueError("Provider returned empty polished text")
         return {"polished": polished, "original": request.text}
     except Exception as e:
         logger.error(f"Polish failed: {e}")
-        return {"polished": request.text, "original": request.text, "error": str(e)}
+        raise HTTPException(status_code=500, detail=str(e))
 

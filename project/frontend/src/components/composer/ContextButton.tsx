@@ -87,9 +87,10 @@ export function ContextButton({ className }: { className?: string }) {
   };
 
   const handleCompact = async (level: string) => {
-    const cid = useChatStore.getState().currentConversationId;
+    const state = useChatStore.getState();
+    const cid = state.currentConversationId;
     if (!cid) return;
-    try { await compactContextApi(cid, level); } catch {}
+    try { await compactContextApi(cid, state.contextProfile.id, state.selectedModelId, level); } catch {}
     await fetchContextUsage();
   };
 

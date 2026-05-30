@@ -43,3 +43,4 @@ project/backend/backend*.log
 
 # Workspace files (user-generated)
 project/workspaces/
+.codebuddy

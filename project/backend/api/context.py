@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -264,6 +264,7 @@ async def compact_context(
     conversation_id: str,
     profile_name: str = "balanced",
     model_id: str = "deepseek-chat",
+    level: str = Query(default="medium", pattern="^(none|light|medium|aggressive)$"),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> CompactResponse:
@@ -283,6 +284,7 @@ async def compact_context(
             "conversation_id": conversation_id,
             "profile": profile_name,
             "model_id": model_id,
+            "level": level,
         },
     )
 
@@ -299,36 +301,70 @@ async def compact_context(
         budget = calculate_token_budget(scaled, model)
 
         # Estimate current usage (simplified — production would query DB)
-        estimated_usage = int(budget.available_input_budget * 0.85)
-        budget.set_usage(estimated_usage)
+        from context.context_builder import ContextBuilder, ContextState
 
-        status = budget.check_budget()
+        builder = ContextBuilder()
+        ctx = ContextState()
+        ctx.messages = await builder._fetch_recent_messages(conversation_id, scaled)
+        ctx.current_query = "[manual context compact]"
+
+        from db.models import ToolCall
+        from sqlalchemy import select
+        import json as _json
+        import uuid as _uuid
+
+        conv_uuid = _uuid.UUID(conversation_id)
+        tool_rows = (
+            await db.execute(
+                select(ToolCall)
+                .where(ToolCall.conversation_id == conv_uuid)
+                .order_by(ToolCall.created_at.asc())
+            )
+        ).scalars().all()
+        ctx.tool_results = [
+            {
+                "tool": row.tool_name,
+                "content": _json.dumps(row.result or {}, ensure_ascii=False, default=str),
+                "status": row.status,
+            }
+            for row in tool_rows
+        ]
+
+        actual_usage = (
+            sum(estimate_tokens(builder._get_msg_content(m)) for m in ctx.messages)
+            + sum(estimate_tokens(t.get("content", "")) for t in ctx.tool_results)
+        )
+        forced_ratios = {"none": 0.0, "light": 0.71, "medium": 0.82, "aggressive": 0.91}
+        forced_usage = int(budget.available_input_budget * forced_ratios[level])
+        budget.set_usage(max(actual_usage, forced_usage))
+
+        budget_status = budget.check_budget()
 
         # Run compression
         from context.compression_engine import CompressionEngine
-        from context.context_builder import ContextState
-
         engine = CompressionEngine()
-        ctx = ContextState()
 
         result = await engine.compress(ctx, scaled, budget)
 
         total_saved = result.get("total_tokens_saved", 0)
         warnings = result.get("warnings", [])
+        if not ctx.messages and not ctx.tool_results:
+            warnings.append("No conversation messages or tool results available to compact")
 
         logger.info(
             "Context compacted",
             extra={
                 "conversation_id": conversation_id,
                 "tokens_saved": total_saved,
-                "compression_level": status.compression_level,
+                "compression_level": budget_status.compression_level,
+                "actual_usage": actual_usage,
             },
         )
 
         return CompactResponse(
             status="compacted",
             conversation_id=conversation_id,
-            compression_level=status.compression_level,
+            compression_level=budget_status.compression_level,
             tokens_saved=total_saved,
             warnings=warnings,
         )

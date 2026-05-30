@@ -20,8 +20,28 @@ export interface Message {
   thinkingBlocks?: string[];  // per-round thinking blocks (each round = one card)
   segments?: MessageSegment[];
   toolCalls?: ToolCall[];
+  files?: UploadedFileMeta[];
   timestamp: number;
   status?: 'sending' | 'streaming' | 'complete' | 'error';
+}
+
+export interface UploadedFileMeta {
+  id: string;
+  originalName: string;
+  safeName?: string;
+  mimeType: string;
+  ext: string;
+  size: number;
+  workspacePath: string;
+  createdAt?: string;
+  status: 'queued' | 'uploading' | 'uploaded' | 'parsed' | 'failed';
+  textExtracted?: boolean;
+  textLength?: number;
+  textPreview?: string;
+  contextPolicy?: 'none' | 'weak' | 'normal' | 'compressed';
+  contextText?: string;
+  resourceUri?: string;
+  error?: string;
 }
 
 export type MessageSegment =

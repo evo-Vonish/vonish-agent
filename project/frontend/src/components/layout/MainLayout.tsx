@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { AlertCircle, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
+import { useChatStore } from '@/stores/chatStore';
 import { TopBar } from './TopBar';
 import { Sidebar } from './Sidebar';
 import { StatusBar } from './StatusBar';
@@ -17,6 +19,7 @@ interface MainLayoutProps {
 
 export function MainLayout({ children, className }: MainLayoutProps) {
   const { rightPanelOpen, setIsMobile } = useUIStore();
+  const { apiError, clearApiError } = useChatStore();
   const [panelWidth, setPanelWidth] = useState(DEFAULT_PANEL_WIDTH);
   const dragging = useRef(false);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -65,6 +68,25 @@ export function MainLayout({ children, className }: MainLayoutProps) {
       )}
     >
       <TopBar />
+      {apiError && (
+        <div className="fixed right-4 top-12 z-50 max-w-md rounded-md border border-error/30 bg-error/10 px-3 py-2 text-xs text-error shadow-lg backdrop-blur">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+            <div className="min-w-0 flex-1">
+              <div className="font-medium">工作流已中断</div>
+              <div className="mt-0.5 break-words text-error/80">{apiError}</div>
+            </div>
+            <button
+              type="button"
+              onClick={clearApiError}
+              className="rounded p-0.5 hover:bg-error/15"
+              aria-label="关闭错误提示"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
       <div className="flex-1 flex overflow-hidden">
         <Sidebar />
         <main className="flex-1 flex flex-col overflow-hidden relative min-w-0">

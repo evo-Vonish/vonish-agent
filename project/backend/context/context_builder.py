@@ -256,6 +256,11 @@ class ContextBuilder:
 
         # 4f: Recent Messages (Sacred Window — append-only)
         recent_messages = await self._fetch_recent_messages(conversation_id, profile)
+        if recent_messages and recent_messages[-1].get("role") == "user":
+            # chat_stream stores the user message before AgentLoop starts; the
+            # current query is appended separately below, so drop that duplicate.
+            if self._get_msg_content(recent_messages[-1]).strip() == user_query.strip():
+                recent_messages = recent_messages[:-1]
         ctx.messages = recent_messages
         msg_tokens = sum(
             self._estimate_tokens(self._get_msg_content(m))
@@ -427,29 +432,33 @@ class ContextBuilder:
         Returns:
             System prompt string.
         """
-        parts = [
-            "You are an AI assistant with access to tools. "
-            "Your goal is to help the user accomplish their tasks efficiently.",
-            "",
-            "## Guidelines",
-            "- Use tools when they help answer the question",
-            "- After tool results, provide a clear summary",
-            "- Be concise but thorough",
-            "- Think step by step for complex tasks",
-            "- Always respond in the same language as the user",
-            "- When reading files, focus on relevant sections",
-            "- When editing files, make minimal precise changes",
-            "",
-            f"## Context Budget",
-            f"- Profile: {profile.name}",
-            f"- Model: {model.model_id} (ctx: {model.context_window:,})",
-            f"- Max input tokens: {profile.max_input_tokens:,}",
-            f"- Recent turns kept: {profile.recent_turns}",
-            f"- Tool result mode: {profile.tool_result_mode}",
-            f"- Memory recall: top {profile.memory_top_k}",
-        ]
+        try:
+            from api.prompt import get_enabled_tools
+            from prompt.prompt_builder import PromptBuilder
 
-        prompt = "\n".join(parts)
+            prompt = PromptBuilder().build(
+                enabled_tools=get_enabled_tools(),
+                model_id=model.model_id,
+            ).content
+        except Exception:
+            prompt = (
+                "You are an AI assistant with access to tools. "
+                "Your goal is to help the user accomplish their tasks efficiently."
+            )
+
+        budget_guide = "\n".join(
+            [
+                "",
+                "## Context Budget",
+                f"- Profile: {profile.name}",
+                f"- Model: {model.model_id} (ctx: {model.context_window:,})",
+                f"- Max input tokens: {profile.max_input_tokens:,}",
+                f"- Recent turns kept: {profile.recent_turns}",
+                f"- Tool result mode: {profile.tool_result_mode}",
+                f"- Memory recall: top {profile.memory_top_k}",
+            ]
+        )
+        prompt = f"{prompt}\n{budget_guide}"
 
         # Hash deduplication
         prompt_hash = self._compute_hash(prompt)
@@ -542,9 +551,15 @@ class ContextBuilder:
             List of tool definition dicts.
         """
         try:
+            from api.prompt import get_enabled_tools
             from agent.tool_registry import ToolRegistry
 
             registry = ToolRegistry()
+            if not registry.list_all():
+                from agent.tool_registry import register_default_tools
+
+                register_default_tools()
+            enabled = set(get_enabled_tools())
             defs = registry.list_for_context()
             return [
                 {
@@ -553,6 +568,7 @@ class ContextBuilder:
                     "parameters": d.parameters,
                 }
                 for d in defs
+                if d.name in enabled
             ]
         except Exception as e:
             logger.warning(f"Tool definitions fetch failed: {e}")
@@ -589,9 +605,40 @@ class ContextBuilder:
             List of message dicts (immutable — never modify in-place).
         """
         try:
-            # In production: query from database
-            # For now: return empty list, caller will handle
-            return []
+            import uuid as _uuid
+            from sqlalchemy import select
+
+            from db.models import Message as MessageModel
+            from db.session import get_session_maker
+
+            conv_uuid = _uuid.UUID(conversation_id)
+            limit = max(
+                int(getattr(profile, "min_recent_messages", 6) or 6),
+                int(getattr(profile, "recent_turns", 16) or 16) * 2,
+            )
+            session_maker = get_session_maker()
+            async with session_maker() as db:
+                q = (
+                    select(MessageModel)
+                    .where(MessageModel.conversation_id == conv_uuid)
+                    .order_by(MessageModel.created_at.asc())
+                )
+                rows = list((await db.execute(q)).scalars().all())[-limit:]
+
+            messages: list[dict[str, Any]] = []
+            for row in rows:
+                if row.role not in {"system", "user", "assistant"}:
+                    continue
+                content = self._extract_message_text(row.content)
+                if not content:
+                    continue
+                messages.append(
+                    {
+                        "role": row.role,
+                        "content": content,
+                    }
+                )
+            return messages
         except Exception as e:
             logger.warning(f"Recent messages fetch failed: {e}")
             return []
@@ -605,8 +652,22 @@ class ContextBuilder:
         Returns:
             User ID string or None.
         """
-        # In production: query conversation from DB
-        return None
+        try:
+            import uuid as _uuid
+            from sqlalchemy import select
+
+            from db.models import Conversation
+            from db.session import get_session_maker
+
+            conv_uuid = _uuid.UUID(conversation_id)
+            session_maker = get_session_maker()
+            async with session_maker() as db:
+                q = select(Conversation.user_id).where(Conversation.id == conv_uuid)
+                user_id = (await db.execute(q)).scalar()
+            return str(user_id) if user_id else None
+        except Exception as e:
+            logger.debug(f"Conversation user lookup failed: {e}")
+            return None
 
     def _assemble_system_prompt(
         self,
@@ -675,6 +736,30 @@ class ContextBuilder:
         elif isinstance(content, list):
             return json.dumps(content, ensure_ascii=False)
         return str(content)
+
+    @staticmethod
+    def _extract_message_text(content: list[dict[str, Any]] | str | None) -> str:
+        """Extract model-facing text from stored DB content blocks."""
+        if content is None:
+            return ""
+        if isinstance(content, str):
+            return content
+        if not isinstance(content, list):
+            return str(content)
+
+        texts: list[str] = []
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "text" and block.get("text"):
+                texts.append(str(block.get("text")))
+            elif block.get("type") == "segments" and isinstance(block.get("segments"), list):
+                for segment in block["segments"]:
+                    if not isinstance(segment, dict):
+                        continue
+                    if segment.get("type") == "text" and segment.get("content"):
+                        texts.append(str(segment.get("content")))
+        return "\n".join(text for text in texts if text.strip()).strip()
 
 
 # ---------------------------------------------------------------------------
