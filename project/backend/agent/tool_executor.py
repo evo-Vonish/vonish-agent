@@ -303,6 +303,7 @@ class ToolExecutor:
             "apply_patch": self._handle_apply_patch,
             "list_directory": self._handle_list_directory,
             "snapshot": self._handle_snapshot,
+            "search_workspace": self._handle_search_workspace,
             "set_todo_list": self._handle_set_todo_list,
             "ask_user_question": self._handle_ask_user_question,
             "request_approval": self._handle_request_approval,
@@ -801,6 +802,34 @@ class ToolExecutor:
             "total_size": total_size,
             "files": files[:200],
         }
+
+    # ── Search Workspace ──────────────────────────────────────────────
+
+    async def _handle_search_workspace(
+        self,
+        pattern: str = "",
+        path: str = ".",
+        regex: bool = False,
+        case_sensitive: bool = False,
+        include_globs: list[str] | None = None,
+        exclude_globs: list[str] | None = None,
+        max_results: int = 50,
+        context_lines: int = 2,
+        conversation_id: str = "",
+        **_: Any,
+    ) -> dict[str, Any]:
+        from agent.tool_handlers.search_workspace import handle_search_workspace
+        return await handle_search_workspace(
+            conversation_id=conversation_id,
+            pattern=pattern,
+            path=path,
+            regex=regex,
+            case_sensitive=case_sensitive,
+            include_globs=include_globs,
+            exclude_globs=exclude_globs,
+            max_results=max_results,
+            context_lines=context_lines,
+        )
 
     # ── Set Todo List ─────────────────────────────────────────────────
 

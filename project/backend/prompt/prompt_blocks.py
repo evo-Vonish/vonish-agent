@@ -65,6 +65,7 @@ TODO_RULES = PromptBlock(
         "- Before giving a final summary, ensure ALL todo items are 'done' or 'cancelled'.\n"
         "- NEVER announce a task as finished if its todo item is still 'todo' or 'doing'.\n"
         "- If blocked by missing info, mark item 'blocked' and call ask_user_question.\n"
+        "- To locate code or errors, use search_workspace instead of reading many files blindly.\n"
     ),
 )
 

@@ -25,6 +25,7 @@ _tool_configs: dict[str, bool] = {
     # Workspace
     "list_directory": True,
     "snapshot": True,
+    "search_workspace": True,
     # Shell / Python
     "shell_command": True,
     "ipython": True,

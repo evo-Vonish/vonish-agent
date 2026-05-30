@@ -615,6 +615,29 @@ def register_default_tools() -> None:
         )
     )
 
+    # Search Workspace (grep)
+    registry.register(
+        ToolDefinition(
+            name="search_workspace",
+            description="Search text patterns across files in the workspace. Use to locate code, config, errors, or symbols before reading individual files.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "pattern": {"type": "string", "description": "Keyword or regex pattern to search"},
+                    "path": {"type": "string", "description": "Relative path within workspace", "default": "."},
+                    "regex": {"type": "boolean", "description": "Treat pattern as regex", "default": False},
+                    "case_sensitive": {"type": "boolean", "default": False},
+                    "include_globs": {"type": "array", "items": {"type": "string"}, "default": []},
+                    "exclude_globs": {"type": "array", "items": {"type": "string"}},
+                    "max_results": {"type": "integer", "default": 50},
+                    "context_lines": {"type": "integer", "default": 2},
+                },
+                "required": ["pattern"],
+            },
+            category="workspace",
+        )
+    )
+
     # Todo List
     registry.register(
         ToolDefinition(
