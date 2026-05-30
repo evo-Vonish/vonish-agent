@@ -286,12 +286,16 @@ class ConversationSearchResponse(BaseModel):
     total: int
 
 
-def _extract_text(content: list[dict] | None) -> str:
-    """Extract plain text from content blocks."""
+def _extract_text(content: Any) -> str:
+    """Extract plain text from content blocks or return string directly."""
     if not content:
         return ""
-    texts = [b.get("text", "") for b in content if b.get("type") == "text"]
-    return "\n".join(texts)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        texts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
+        return "\n".join(texts)
+    return str(content)
 
 
 def _extract_segments(content: list[dict] | None) -> list[dict[str, Any]] | None:
@@ -494,8 +498,11 @@ def _anonymize(text: str, conversation_id: str) -> str:
 
 
 def _format_md(conversation: Conversation, msgs: list[Message], opts: dict) -> str:
-    title = opts.get("customTitle") or conversation.title
-    now = __import__("datetime").datetime.now(conversation.created_at.tzinfo).isoformat()
+    title = opts.get("customTitle") or (conversation.title or "export")
+    try:
+        now = __import__("datetime").datetime.now(getattr(conversation.created_at, 'tzinfo', None) if conversation.created_at else None).isoformat()
+    except Exception:
+        now = __import__("datetime").datetime.now().isoformat()
     lines = [
         f"# 会话导出 — {title}",
         "",
@@ -562,15 +569,24 @@ async def export_conversation(
     )
     msgs = (await db.execute(msgs_q)).scalars().all()
 
-    opts = request.model_dump()
-    if request.format == "txt":
-        content = _format_txt(conv, msgs, opts)
-        mime = "text/plain"
-        ext = "txt"
-    else:
-        content = _format_md(conv, msgs, opts)
-        mime = "text/markdown" if request.format == "md" else "text/markdown"
-        ext = "md"
+    try:
+        opts = request.model_dump()
+    except Exception:
+        opts = {k: getattr(request, k, None) for k in request.model_fields}
+    # Also accept common misspelling
+    if "anonimize" in opts and "anonymize" not in opts:
+        opts["anonymize"] = opts.get("anonimize")
+    try:
+        if request.format == "txt":
+            content = _format_txt(conv, msgs, opts)
+            mime = "text/plain"
+            ext = "txt"
+        else:
+            content = _format_md(conv, msgs, opts)
+            mime = "text/markdown" if request.format == "md" else "text/markdown"
+            ext = "md"
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Export formatting failed: {str(e)}")
 
     safe_title = "".join(c for c in (request.customTitle or conv.title or "export") if c.isalnum() or c in " _-")[:40]
     ts = __import__("datetime").datetime.now().strftime("%Y%m%d_%H%M")
