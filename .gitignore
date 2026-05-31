@@ -51,3 +51,4 @@ project/workspaces/
 local_agent.db 
 *.log 
 workspace_cache/ 
+_t*.py 
