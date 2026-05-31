@@ -42,6 +42,14 @@ SSE_EVENT_TYPES = {
     "todo_updated",
     "approval_requested",
     "ask_requested",
+    # Structured execution segment events
+    "segment_start",
+    "segment_update",
+    "segment_end",
+    "step_start",
+    "step_delta",
+    "step_end",
+    "workflow_error",
 }
 
 

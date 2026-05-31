@@ -432,6 +432,38 @@ function normalizeExecutionSegment(raw: unknown): ExecutionSegment {
   };
 }
 
+function createWorkflowErrorSegment(
+  raw: unknown,
+  fallback: {
+    title?: string;
+    message?: string;
+    errorType?: string;
+    severity?: WorkflowError['severity'];
+  } = {},
+): Extract<MessageSegment, { type: 'workflow_error' }> {
+  const error = normalizeWorkflowError(
+    {
+      title: fallback.title ?? '工作流已中断',
+      message: fallback.message ?? '处理流程异常中断。',
+      errorType: fallback.errorType ?? 'workflow_error',
+      severity: fallback.severity ?? 'error',
+      recoverable: true,
+      actions: [
+        { id: 'continue_task', label: '继续任务', style: 'primary' },
+        { id: 'copy_error', label: '复制错误', style: 'secondary' },
+      ],
+      ...(raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}),
+    },
+  );
+  return {
+    id: `workflow-error-${error.id}`,
+    type: 'workflow_error',
+    error,
+    retryPrompt:
+      '继续任务。请基于上一次工作流中断的位置继续执行，先简要说明中断原因和恢复计划，然后继续完成任务。',
+  };
+}
+
 function normalizeToolCall(raw: unknown): ToolCall {
   const source = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
   const rawStatus = String(source.status ?? '');
@@ -498,6 +530,12 @@ function normalizeAssistantSegments(
           id: String(source.id || `execution-${execution.id}`),
           type: 'execution',
           execution,
+        });
+      } else if (source.type === 'workflow_error') {
+        normalized.push({
+          ...createWorkflowErrorSegment(source.error ?? source),
+          id: String(source.id || `workflow-error-${index}`),
+          retryPrompt: source.retryPrompt ? String(source.retryPrompt) : undefined,
         });
       }
     });

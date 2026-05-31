@@ -190,13 +190,13 @@ export function Composer({ className }: ComposerProps) {
                   uploading: attachment.uploading,
                 }))}
                 onRemove={removeAttachment}
-                className="mb-0 rounded-t-xl border border-b-0 border-border bg-background"
+                className="mb-0 rounded-t-[18px] border border-b-0 border-white/10 bg-[#202020]"
               />
             )}
             <div
               className={cn(
-                'relative flex items-end gap-2 border border-border bg-background px-3 py-2 transition-colors focus-within:border-primary/50',
-                attachments.length > 0 ? 'rounded-b-xl rounded-t-none' : 'rounded-xl',
+                'relative flex items-end gap-2 border border-white/10 bg-[#202020] px-3 py-2 shadow-[0_8px_30px_rgba(0,0,0,0.18)] transition-all duration-200 focus-within:border-white/[0.18] focus-within:bg-[#242424]',
+                attachments.length > 0 ? 'rounded-b-[18px] rounded-t-none' : 'rounded-[18px]',
               )}
             >
               <textarea
@@ -219,7 +219,7 @@ export function Composer({ className }: ComposerProps) {
                 <button
                   type="button"
                   onClick={() => setExpanded((value) => !value)}
-                  className="mb-1 flex-shrink-0 rounded-md p-1 text-foreground-muted transition-colors hover:bg-surface-hover hover:text-foreground"
+                  className="mb-1 flex-shrink-0 rounded-full p-1 text-foreground-muted transition-colors hover:bg-white/[0.07] hover:text-foreground"
                   title={expanded ? t('chat.collapse') : t('chat.expand')}
                 >
                   {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
@@ -230,7 +230,7 @@ export function Composer({ className }: ComposerProps) {
                 <button
                   type="button"
                   onClick={stopGeneration}
-                  className="mb-0.5 flex-shrink-0 rounded-lg bg-error p-2 text-white transition-all hover:bg-error/80"
+                  className="mb-0.5 flex-shrink-0 rounded-full bg-error p-2 text-white transition-all duration-200 hover:bg-error/80 hover:scale-105"
                   title={t('chat.stop')}
                 >
                   <Square className="h-4 w-4" fill="currentColor" />
@@ -241,10 +241,10 @@ export function Composer({ className }: ComposerProps) {
                   onClick={handleSend}
                   disabled={!canSend}
                   className={cn(
-                    'mb-0.5 flex-shrink-0 rounded-lg p-2 transition-all',
+                    'mb-0.5 flex-shrink-0 rounded-full p-2 transition-all duration-200',
                     canSend
-                      ? 'bg-primary text-white hover:bg-primary-hover'
-                      : 'cursor-not-allowed bg-surface-hover text-foreground-muted',
+                      ? 'bg-primary text-white hover:bg-primary-hover hover:scale-105'
+                      : 'cursor-not-allowed bg-white/[0.07] text-foreground-muted',
                   )}
                 >
                   <Send className="h-4 w-4" />

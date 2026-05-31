@@ -9,6 +9,7 @@ import { ThinkingCard } from './ThinkingCard';
 import { ToolCard } from './ToolCard';
 import { TodoCard } from './TodoCard';
 import { ExecutionSegmentCard } from './ExecutionSegmentCard';
+import { WorkflowErrorCard } from './WorkflowErrorCard';
 
 interface MessageBubbleProps {
   message: Message;
@@ -18,7 +19,7 @@ interface MessageBubbleProps {
 function AssistantTextBlock({ content }: { content: string }) {
   if (!content) return null;
   return (
-    <div className="rounded-2xl mb-2 bg-surface text-foreground w-full px-1 py-0.5">
+    <div className="mb-2 w-full px-0.5 py-0.5 text-[15px] leading-7 text-foreground">
       <MarkdownRenderer content={content} />
     </div>
   );
@@ -41,6 +42,10 @@ function SegmentRenderer({ segment }: { segment: MessageSegment }) {
 
   if (segment.type === 'execution') {
     return <ExecutionSegmentCard segment={segment.execution} />;
+  }
+
+  if (segment.type === 'workflow_error') {
+    return <WorkflowErrorCard error={segment.error} retryPrompt={segment.retryPrompt} />;
   }
 
   return <AssistantTextBlock content={segment.content} />;
@@ -137,7 +142,7 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
         )}
 
         {isAssistant && hasSegments && (
-          <div className="space-y-2 w-full">
+          <div className="space-y-4 w-full">
             {message.segments?.map((segment) => (
               <SegmentRenderer key={segment.id} segment={segment} />
             ))}
@@ -148,7 +153,7 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
           <>
             {((message.thinkingBlocks && message.thinkingBlocks.length > 0) ||
               message.thinkingContent) && (
-              <div className="space-y-2 mb-2 w-full">
+              <div className="space-y-4 mb-2 w-full">
                 {message.thinkingBlocks?.map((block, i) => (
                   <ThinkingCard key={`think-${i}`} content={block} />
                 ))}
@@ -164,7 +169,7 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
             )}
 
             {message.toolCalls && message.toolCalls.length > 0 && (
-              <div className="space-y-2 w-full">
+              <div className="space-y-4 w-full">
                 {message.toolCalls.map((tool) => (
                   <ToolCard key={tool.id} tool={tool} />
                 ))}

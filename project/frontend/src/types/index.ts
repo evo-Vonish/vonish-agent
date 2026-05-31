@@ -66,6 +66,12 @@ export type MessageSegment =
       id: string;
       type: 'execution';
       execution: ExecutionSegment;
+    }
+  | {
+      id: string;
+      type: 'workflow_error';
+      error: WorkflowError;
+      retryPrompt?: string;
     };
 
 export interface WorkflowErrorAction {
