@@ -304,6 +304,9 @@ class ToolExecutor:
             "list_directory": self._handle_list_directory,
             "snapshot": self._handle_snapshot,
             "search_workspace": self._handle_search_workspace,
+            "git_status": self._handle_git_status,
+            "git_diff": self._handle_git_diff,
+            "git_history": self._handle_git_history,
             "set_todo_list": self._handle_set_todo_list,
             "ask_user_question": self._handle_ask_user_question,
             "request_approval": self._handle_request_approval,
@@ -829,6 +832,65 @@ class ToolExecutor:
             exclude_globs=exclude_globs,
             max_results=max_results,
             context_lines=context_lines,
+        )
+
+    # ── Git Workspace Tools ───────────────────────────────────────────
+
+    def _resolve_tool_workspace_id(self, workspace_id: str = "current", conversation_id: str = "") -> str:
+        if not workspace_id or workspace_id == "current":
+            return conversation_id or "default"
+        return workspace_id
+
+    async def _handle_git_status(
+        self,
+        workspace_id: str = "current",
+        conversation_id: str = "",
+        **_: Any,
+    ) -> dict[str, Any]:
+        from services.git_service import git_status
+
+        return await git_status(self._resolve_tool_workspace_id(workspace_id, conversation_id))
+
+    async def _handle_git_diff(
+        self,
+        workspace_id: str = "current",
+        scope: str = "working",
+        file_path: str | None = None,
+        context_lines: int = 3,
+        commit: str | None = None,
+        conversation_id: str = "",
+        **_: Any,
+    ) -> dict[str, Any]:
+        from services.git_service import git_diff
+
+        return await git_diff(
+            self._resolve_tool_workspace_id(workspace_id, conversation_id),
+            scope=scope,
+            file_path=file_path,
+            context_lines=context_lines,
+            commit=commit,
+        )
+
+    async def _handle_git_history(
+        self,
+        workspace_id: str = "current",
+        mode: str = "log",
+        file_path: str | None = None,
+        line_start: int | None = None,
+        line_end: int | None = None,
+        limit: int = 20,
+        conversation_id: str = "",
+        **_: Any,
+    ) -> dict[str, Any]:
+        from services.git_service import git_history
+
+        return await git_history(
+            self._resolve_tool_workspace_id(workspace_id, conversation_id),
+            mode=mode,
+            file_path=file_path,
+            line_start=line_start,
+            line_end=line_end,
+            limit=limit,
         )
 
     # ── Set Todo List ─────────────────────────────────────────────────

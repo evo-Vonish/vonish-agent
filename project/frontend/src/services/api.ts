@@ -1,4 +1,4 @@
-import type { Conversation, MessageSegment, Model, ToolCall, UploadedFileMeta } from '@/types';
+import type { Conversation, GitStatus, MessageSegment, Model, ToolCall, UploadedFileMeta, WorkspaceSummary } from '@/types';
 
 interface BackendConversation {
   id: string;
@@ -270,6 +270,13 @@ export interface WorkspaceFileItem {
   size?: number;
   modified_at?: string;
   mime_type?: string;
+  git_status?: string;
+}
+
+export async function listWorkspaces(): Promise<{ workspaces: WorkspaceSummary[]; total: number }> {
+  const response = await fetch('/api/workspaces');
+  if (!response.ok) throw new Error(`Failed to load workspaces: HTTP ${response.status}`);
+  return (await response.json()) as { workspaces: WorkspaceSummary[]; total: number };
 }
 
 /**
@@ -291,6 +298,24 @@ export async function listWorkspaceFiles(
   }
   const body = (await response.json()) as { files: WorkspaceFileItem[] };
   return body.files;
+}
+
+export async function getWorkspaceGitStatus(workspaceId: string): Promise<GitStatus> {
+  const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/git/status`);
+  if (!response.ok) throw new Error(`Failed to load git status: HTTP ${response.status}`);
+  return (await response.json()) as GitStatus;
+}
+
+export async function openWorkspace(workspaceId: string): Promise<{ opened: boolean; path: string; error?: string }> {
+  const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/open`, { method: 'POST' });
+  if (!response.ok) throw new Error(`Failed to open workspace: HTTP ${response.status}`);
+  return (await response.json()) as { opened: boolean; path: string; error?: string };
+}
+
+export async function refreshWorkspace(workspaceId: string): Promise<{ files: WorkspaceFileItem[]; git: GitStatus }> {
+  const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/refresh`, { method: 'POST' });
+  if (!response.ok) throw new Error(`Failed to refresh workspace: HTTP ${response.status}`);
+  return (await response.json()) as { files: WorkspaceFileItem[]; git: GitStatus };
 }
 
 /**

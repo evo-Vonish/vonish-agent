@@ -11,15 +11,21 @@ Provides:
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import User, get_current_user
+from core.config import settings
 from core.logging import get_logger
+from db.models import Conversation
 from db.session import get_db
+from services.git_service import git_diff, git_history, git_status, workspace_root
 from workspace.workspace_manager import WorkspaceManager
 
 logger = get_logger(__name__)
@@ -50,6 +56,12 @@ class FileResponse(BaseModel):
     modified_at: str | None = None
 
 
+class CreateWorkspaceItemRequest(BaseModel):
+    path: str = Field(..., description="Relative path")
+    type: str = Field(default="file", description="file or folder")
+    content: str = Field(default="", description="Initial file content")
+
+
 # ---------------------------------------------------------------------------
 # Workspace Manager
 # ---------------------------------------------------------------------------
@@ -68,6 +80,64 @@ def get_workspace_manager() -> WorkspaceManager:
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
+
+@router.get("/workspaces")
+async def list_workspaces(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """List known local workspaces.
+
+    Conversation workspaces remain the source of truth, with orphan folders
+    under settings.workspace_root included so the file tab can browse them.
+    """
+    root = Path(settings.workspace_root).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    conversations = (await db.execute(select(Conversation))).scalars().all()
+    by_id = {str(conv.id): conv for conv in conversations}
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for conv in conversations:
+        workspace_id = str(conv.id)
+        path = workspace_root(workspace_id)
+        status = await git_status(workspace_id)
+        items.append(
+            {
+                "id": workspace_id,
+                "name": conv.title or workspace_id[:8],
+                "rootPath": str(path),
+                "activeConversationId": workspace_id,
+                "isGitRepo": bool(status.get("is_git_repo")),
+                "branch": status.get("branch"),
+                "fileCount": sum(1 for p in path.rglob("*") if p.is_file()) if path.exists() else 0,
+                "modifiedCount": sum(len(status.get(key, [])) for key in ("staged", "modified", "untracked", "deleted", "conflicts")),
+                "lastOpenedAt": conv.updated_at.isoformat() if conv.updated_at else "",
+            }
+        )
+        seen.add(workspace_id)
+
+    for child in root.iterdir():
+        if not child.is_dir() or child.name in seen:
+            continue
+        status = await git_status(child.name)
+        conv = by_id.get(child.name)
+        items.append(
+            {
+                "id": child.name,
+                "name": conv.title if conv else child.name,
+                "rootPath": str(child),
+                "activeConversationId": child.name if conv else None,
+                "isGitRepo": bool(status.get("is_git_repo")),
+                "branch": status.get("branch"),
+                "fileCount": sum(1 for p in child.rglob("*") if p.is_file()),
+                "modifiedCount": sum(len(status.get(key, [])) for key in ("staged", "modified", "untracked", "deleted", "conflicts")),
+                "lastOpenedAt": "",
+            }
+        )
+
+    return {"workspaces": sorted(items, key=lambda item: item["name"].lower()), "total": len(items)}
 
 
 @router.get("/workspaces/{conversation_id}/files")
@@ -98,12 +168,85 @@ async def list_workspace_files(
                 "size": f.size,
                 "mime_type": f.mime_type,
                 "is_directory": f.is_directory,
+                "type": "folder" if f.is_directory else "file",
                 "modified_at": f.modified_at.isoformat() if f.modified_at else None,
             }
             for f in files
         ],
         "total": len(files),
     }
+
+
+@router.get("/workspaces/{conversation_id}/git/status")
+async def workspace_git_status(
+    conversation_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return await git_status(conversation_id)
+
+
+@router.get("/workspaces/{conversation_id}/git/diff")
+async def workspace_git_diff(
+    conversation_id: str,
+    scope: str = "working",
+    file_path: str | None = None,
+    context_lines: int = 3,
+    commit: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return await git_diff(conversation_id, scope=scope, file_path=file_path, context_lines=context_lines, commit=commit)
+
+
+@router.get("/workspaces/{conversation_id}/git/history")
+async def workspace_git_history(
+    conversation_id: str,
+    mode: str = "log",
+    file_path: str | None = None,
+    line_start: int | None = None,
+    line_end: int | None = None,
+    limit: int = 20,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return await git_history(
+        conversation_id,
+        mode=mode,
+        file_path=file_path,
+        line_start=line_start,
+        line_end=line_end,
+        limit=limit,
+    )
+
+
+@router.post("/workspaces/{conversation_id}/open")
+async def open_workspace(
+    conversation_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    root = workspace_root(conversation_id)
+    try:
+        if os.name == "nt":
+            os.startfile(str(root))  # type: ignore[attr-defined]
+        else:
+            process = await __import__("asyncio").create_subprocess_exec("xdg-open", str(root))
+            await process.wait()
+        return {"opened": True, "path": str(root)}
+    except Exception as exc:
+        return {"opened": False, "path": str(root), "error": str(exc)}
+
+
+@router.post("/workspaces/{conversation_id}/refresh")
+async def refresh_workspace(
+    conversation_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    files = await list_workspace_files(conversation_id, recursive=True, db=db, user=user)
+    status = await git_status(conversation_id)
+    return {"workspace_id": conversation_id, "files": files.get("files", []), "git": status}
 
 
 @router.get("/workspaces/{conversation_id}/files/{path:path}")

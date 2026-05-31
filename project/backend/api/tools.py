@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent.tool_executor import ToolCallRequest, get_tool_executor
 from agent.tool_registry import ToolRegistry
+from api.prompt import get_all_tool_configs
 from core.auth import User, get_current_user
 from core.logging import get_logger
 from db.session import get_db
@@ -68,12 +69,18 @@ async def list_tools(
 ):
     """List all available tools with full metadata."""
     registry = ToolRegistry()
+    configs = get_all_tool_configs()
     tools = [
         {
             "name": t.name,
             "description": t.description,
             "category": t.category,
+            "enabled": configs.get(t.name, True),
+            "risk": "medium" if t.requires_confirmation else "low",
+            "risk_level": "medium" if t.requires_confirmation else "low",
+            "requires_approval": t.requires_confirmation,
             "requires_confirmation": t.requires_confirmation,
+            "workspace_bound": t.category in {"workspace", "file_ops", "shell_ops", "python_ops"},
             "schema": t.parameters,
         }
         for t in registry.list_for_context()
@@ -83,6 +90,36 @@ async def list_tools(
         tools=tools,
         total=len(tools),
     )
+
+
+@router.get("/tools/stats")
+async def tool_stats(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    registry = ToolRegistry()
+    configs = get_all_tool_configs()
+    tools = registry.list_for_context()
+    return {
+        "total": len(tools),
+        "enabled": sum(1 for tool in tools if configs.get(tool.name, True)),
+        "disabled": sum(1 for tool in tools if not configs.get(tool.name, True)),
+        "high_risk": sum(1 for tool in tools if tool.requires_confirmation),
+        "categories": {
+            category: len([tool for tool in tools if tool.category == category])
+            for category in sorted({tool.category for tool in tools})
+        },
+    }
+
+
+@router.get("/tools/categories")
+async def tool_categories(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    registry = ToolRegistry()
+    categories = sorted({tool.category for tool in registry.list_for_context()})
+    return {"categories": categories}
 
 
 @router.post("/tools/execute", response_model=ToolResponse)

@@ -224,6 +224,34 @@ export interface FileNode {
   children?: FileNode[];
   size?: number;
   modifiedAt?: number;
+  gitStatus?: 'modified' | 'added' | 'deleted' | 'untracked' | 'conflict' | 'clean';
+}
+
+export interface WorkspaceSummary {
+  id: string;
+  name: string;
+  rootPath: string;
+  activeConversationId?: string | null;
+  isGitRepo: boolean;
+  branch?: string;
+  fileCount: number;
+  modifiedCount: number;
+  lastOpenedAt?: string;
+}
+
+export interface GitStatus {
+  workspace_id?: string;
+  root_path?: string;
+  is_git_repo: boolean;
+  branch?: string;
+  is_dirty?: boolean;
+  staged?: string[];
+  modified?: string[];
+  untracked?: string[];
+  deleted?: string[];
+  conflicts?: string[];
+  message?: string;
+  error?: string;
 }
 
 export interface Attachment {

@@ -611,14 +611,33 @@ export const useChatStore = create<ChatState>((set, get) => ({
           selectedModelId,
           conversations,
           currentConversationId,
-          messages: currentConversation?.messages ?? [],
+          messages: [],
           initialized: true,
           apiError: null,
         };
       });
-      // Load workspace for initial conversation
+      // Load messages and workspace for initial conversation
       const cid = get().currentConversationId;
-      if (cid) useWorkspaceStore.getState().loadWorkspace(cid);
+      if (cid) {
+        // Load actual messages from DB
+        try {
+          const result = await getConversationMessages(cid);
+          const msgs: Message[] = result.messages.map((m) => ({
+            id: generateId(),
+            role: m.role as 'user' | 'assistant',
+            content: m.content,
+            thinkingContent: m.thinking ?? undefined,
+            type: 'text',
+            timestamp: Date.parse(m.timestamp) || Date.now(),
+            status: 'complete' as const,
+          }));
+          set({ messages: msgs });
+        } catch {
+          set({ messages: [] });
+        }
+        useWorkspaceStore.getState().loadWorkspace(cid);
+        void get().fetchContextUsage();
+      }
       // Load tools from backend
       void useToolStore.getState().loadToolsFromBackend();
     } catch (error) {
@@ -1358,6 +1377,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       conversations: [conversation, ...state.conversations],
       currentConversationId: conversation.id,
       messages: [],
+      contextUsage: null,
       apiError: null,
       pendingInteraction: null,
     }));

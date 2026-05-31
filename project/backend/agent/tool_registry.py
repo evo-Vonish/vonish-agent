@@ -619,6 +619,71 @@ def register_default_tools() -> None:
         )
     )
 
+    # Git Status
+    registry.register(
+        ToolDefinition(
+            name="git_status",
+            description="Inspect the current workspace Git status. Use before summarizing changes, reviewing modifications, or preparing commits.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "workspace_id": {
+                        "type": "string",
+                        "description": "Workspace id. Use current conversation workspace by default.",
+                        "default": "current",
+                    },
+                },
+            },
+            category="workspace",
+            requires_confirmation=False,
+        )
+    )
+
+    # Git Diff
+    registry.register(
+        ToolDefinition(
+            name="git_diff",
+            description="Read Git diffs for the current workspace. Supports working tree, staged changes, a file, or a commit.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "workspace_id": {"type": "string", "default": "current"},
+                    "scope": {
+                        "type": "string",
+                        "enum": ["working", "staged", "file", "commit"],
+                        "default": "working",
+                    },
+                    "file_path": {"type": "string", "description": "Optional relative file path"},
+                    "commit": {"type": "string", "description": "Commit hash for scope=commit"},
+                    "context_lines": {"type": "integer", "default": 3},
+                },
+            },
+            category="workspace",
+            requires_confirmation=False,
+        )
+    )
+
+    # Git History
+    registry.register(
+        ToolDefinition(
+            name="git_history",
+            description="Read Git history for the current workspace. Combines log and blame modes.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "workspace_id": {"type": "string", "default": "current"},
+                    "mode": {"type": "string", "enum": ["log", "blame"], "default": "log"},
+                    "file_path": {"type": "string", "description": "Optional relative file path"},
+                    "line_start": {"type": "integer"},
+                    "line_end": {"type": "integer"},
+                    "limit": {"type": "integer", "default": 20},
+                },
+            },
+            category="workspace",
+            requires_confirmation=False,
+        )
+    )
+
     # Todo List
     registry.register(
         ToolDefinition(

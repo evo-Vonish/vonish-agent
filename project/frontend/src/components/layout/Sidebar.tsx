@@ -13,6 +13,9 @@ import {
   ChevronRight as ChevronRightIcon,
   X,
   Loader2,
+  RefreshCw,
+  ExternalLink,
+  GitBranch,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
@@ -80,7 +83,29 @@ function FileTreeItem({ node, depth = 0 }: { node: FileNode; depth?: number }) {
         ) : (
           <FileText className="w-3.5 h-3.5 text-foreground-subtle flex-shrink-0" />
         )}
-        <span className="truncate">{node.name}</span>
+        <span className="min-w-0 flex-1 truncate">{node.name}</span>
+        {node.gitStatus && node.gitStatus !== 'clean' && (
+          <span
+            className={cn(
+              'ml-auto rounded px-1 text-[9px] font-semibold',
+              node.gitStatus === 'modified' && 'bg-warning/15 text-warning',
+              node.gitStatus === 'added' && 'bg-success/15 text-success',
+              node.gitStatus === 'deleted' && 'bg-error/15 text-error',
+              node.gitStatus === 'untracked' && 'bg-primary/15 text-primary',
+              node.gitStatus === 'conflict' && 'bg-error/20 text-error',
+            )}
+          >
+            {node.gitStatus === 'modified'
+              ? 'M'
+              : node.gitStatus === 'added'
+                ? 'A'
+                : node.gitStatus === 'deleted'
+                  ? 'D'
+                  : node.gitStatus === 'untracked'
+                    ? 'U'
+                    : '!'}
+          </span>
+        )}
       </button>
       {isFolder && expanded && node.children && (
         <div>
@@ -107,7 +132,18 @@ export function Sidebar({ className }: SidebarProps) {
   } = useUIStore();
   const { conversations, currentConversationId, selectConversation, deleteConversation, createConversation } =
     useChatStore();
-  const { fileTree, loading: wsLoading, loaded: wsLoaded } = useWorkspaceStore();
+  const {
+    fileTree,
+    loading: wsLoading,
+    loaded: wsLoaded,
+    workspaces,
+    activeWorkspaceId,
+    gitStatus,
+    loadWorkspaceList,
+    selectWorkspace: selectWorkspacePanel,
+    refreshActiveWorkspace,
+    openActiveWorkspace,
+  } = useWorkspaceStore();
   const { t } = useI18n();
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'chats' | 'files'>('chats');
@@ -166,6 +202,12 @@ export function Sidebar({ className }: SidebarProps) {
     } catch (e: any) { setExportError(e?.message || String(e));
     } finally { setExporting(false); }
   };
+
+  useEffect(() => {
+    if (activeTab === 'files') {
+      void loadWorkspaceList();
+    }
+  }, [activeTab, loadWorkspaceList]);
 
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const renameRef = useRef<HTMLInputElement>(null);
@@ -691,7 +733,63 @@ export function Sidebar({ className }: SidebarProps) {
       {/* File tree */}
       {activeTab === 'files' && (
         <div className="flex-1 overflow-y-auto p-2">
-          {!currentConversationId ? (
+          <div className="mb-2 rounded-[14px] border border-white/10 bg-[#202020] p-2">
+            <div className="mb-2 flex items-center gap-2">
+              <select
+                value={activeWorkspaceId ?? currentConversationId ?? ''}
+                onChange={(event) => {
+                  if (event.target.value) void selectWorkspacePanel(event.target.value);
+                }}
+                className="min-w-0 flex-1 rounded-md border border-white/10 bg-background px-2 py-1 text-xs text-foreground outline-none"
+              >
+                {!activeWorkspaceId && <option value="">Workspace</option>}
+                {workspaces.map((workspace) => (
+                  <option key={workspace.id} value={workspace.id}>
+                    {workspace.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => void refreshActiveWorkspace()}
+                className="rounded-md p-1.5 text-foreground-muted transition-colors hover:bg-white/[0.07] hover:text-foreground"
+                title="刷新 Workspace"
+              >
+                <RefreshCw className={cn('h-3.5 w-3.5', wsLoading && 'animate-spin')} />
+              </button>
+              <button
+                type="button"
+                onClick={() => void openActiveWorkspace()}
+                className="rounded-md p-1.5 text-foreground-muted transition-colors hover:bg-white/[0.07] hover:text-foreground"
+                title="打开本地目录"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <div className="flex items-center gap-2 text-[11px] text-foreground-subtle">
+              <GitBranch className="h-3.5 w-3.5" />
+              {gitStatus?.is_git_repo ? (
+                <>
+                  <span className="truncate">{gitStatus.branch || 'HEAD'}</span>
+                  <span>·</span>
+                  <span className={gitStatus.is_dirty ? 'text-warning' : 'text-success'}>
+                    {gitStatus.is_dirty
+                      ? `${[
+                          ...(gitStatus.staged ?? []),
+                          ...(gitStatus.modified ?? []),
+                          ...(gitStatus.untracked ?? []),
+                          ...(gitStatus.deleted ?? []),
+                          ...(gitStatus.conflicts ?? []),
+                        ].length} modified`
+                      : 'Clean'}
+                  </span>
+                </>
+              ) : (
+                <span>未初始化 Git</span>
+              )}
+            </div>
+          </div>
+          {!activeWorkspaceId ? (
             <p className="text-xs text-foreground-subtle p-2">{t('nav.workspace.empty')}</p>
           ) : wsLoading ? (
             <div className="flex items-center gap-2 p-2 text-xs text-foreground-muted">
