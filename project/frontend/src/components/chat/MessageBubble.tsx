@@ -8,6 +8,7 @@ import { MarkdownRenderer } from './MarkdownRenderer';
 import { ThinkingCard } from './ThinkingCard';
 import { ToolCard } from './ToolCard';
 import { TodoCard } from './TodoCard';
+import { ExecutionSegmentCard } from './ExecutionSegmentCard';
 
 interface MessageBubbleProps {
   message: Message;
@@ -36,6 +37,10 @@ function SegmentRenderer({ segment }: { segment: MessageSegment }) {
 
   if (segment.type === 'tool') {
     return <ToolCard tool={segment.tool} />;
+  }
+
+  if (segment.type === 'execution') {
+    return <ExecutionSegmentCard segment={segment.execution} />;
   }
 
   return <AssistantTextBlock content={segment.content} />;

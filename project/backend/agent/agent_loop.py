@@ -14,7 +14,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 import uuid
+from datetime import datetime, timezone
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, AsyncGenerator
 
@@ -148,6 +150,83 @@ class AgentLoop:
         loop_id = f"{conversation_id}_{uuid.uuid4().hex[:8]}"
         stop_event = asyncio.Event()
         self._active_loops[conversation_id] = stop_event
+        segment_id: str | None = None
+        segment_started_at: float = 0.0
+        segment_stats: dict[str, int] = {}
+        thinking_step_id: str | None = None
+        thinking_step_started_at: float = 0.0
+
+        def _now_iso() -> str:
+            return datetime.now(timezone.utc).isoformat()
+
+        def _duration_ms(start: float) -> int:
+            return int((time.perf_counter() - start) * 1000)
+
+        def _reset_segment_stats() -> dict[str, int]:
+            return {
+                "thinkingCount": 0,
+                "toolCallCount": 0,
+                "commandCount": 0,
+                "fileReadCount": 0,
+                "fileWriteCount": 0,
+                "fileEditCount": 0,
+                "webRequestCount": 0,
+                "recallCount": 0,
+                "errorCount": 0,
+                "totalTokens": 0,
+            }
+
+        def _tool_step_type(tool_name: str) -> str:
+            if tool_name in {"file_read", "read_file"}:
+                return "file_read"
+            if tool_name in {"write_to_file"}:
+                return "file_write"
+            if tool_name in {"edit_file", "apply_patch"}:
+                return "file_edit"
+            if tool_name in {"shell_command", "ipython"}:
+                return "command"
+            if tool_name == "web_search":
+                return "web_search"
+            if tool_name == "web_fetch":
+                return "web_fetch"
+            if tool_name in {"ask_user_question", "request_approval"}:
+                return "user_interaction"
+            return "tool_call"
+
+        def _tool_title(tool_name: str, args: dict[str, Any]) -> tuple[str, str]:
+            if tool_name in {"file_read", "read_file"}:
+                return "正在读取文件", str(args.get("path") or "")
+            if tool_name == "write_to_file":
+                return "正在写入文件", str(args.get("path") or "")
+            if tool_name in {"edit_file", "apply_patch"}:
+                return "正在修改文件", str(args.get("path") or args.get("file") or "")
+            if tool_name == "shell_command":
+                return "正在运行命令", str(args.get("command") or "")
+            if tool_name == "web_search":
+                return "正在搜索资料", str(args.get("query") or args.get("queries") or "")
+            if tool_name == "web_fetch":
+                return "正在抓取网页", str(args.get("url") or "")
+            if tool_name == "ipython":
+                return "正在运行 Python 代码", ""
+            if tool_name == "ask_user_question":
+                return "等待用户回答", str(args.get("question") or "")
+            if tool_name == "request_approval":
+                return "等待用户确认", str(args.get("title") or "")
+            return f"正在使用 {tool_name}", ""
+
+        def _bump_tool_stats(tool_name: str) -> None:
+            step_type = _tool_step_type(tool_name)
+            segment_stats["toolCallCount"] += 1
+            if step_type == "command":
+                segment_stats["commandCount"] += 1
+            elif step_type == "file_read":
+                segment_stats["fileReadCount"] += 1
+            elif step_type == "file_write":
+                segment_stats["fileWriteCount"] += 1
+            elif step_type == "file_edit":
+                segment_stats["fileEditCount"] += 1
+            elif step_type in {"web_search", "web_fetch"}:
+                segment_stats["webRequestCount"] += 1
 
         # Create model adapter
         adapter = ModelAdapterFactory.create(
@@ -229,6 +308,8 @@ class AgentLoop:
                 in_thinking = False
                 # Collect tool_calls from native function calling
                 native_tool_calls: list[dict] = []
+                tool_step_started_at: dict[str, float] = {}
+                tool_step_ids: dict[str, str] = {}
 
                 # ── Inject todo reminder ──────────────────────────────
                 todo_reminder = self._get_todo_reminder(conversation_id)
@@ -258,14 +339,79 @@ class AgentLoop:
                     if chunk_type == "thinking_delta":
                         if not in_thinking:
                             in_thinking = True
+                            if segment_id is None:
+                                segment_id = f"seg_{uuid.uuid4().hex[:10]}"
+                                segment_started_at = time.perf_counter()
+                                segment_stats = _reset_segment_stats()
+                                yield sse_event(
+                                    "segment_start",
+                                    {
+                                        "segmentId": segment_id,
+                                        "status": "running",
+                                        "startedAt": _now_iso(),
+                                        "collapsible": True,
+                                        "defaultCollapsed": False,
+                                    },
+                                )
+                            thinking_step_id = f"step_{uuid.uuid4().hex[:10]}"
+                            thinking_step_started_at = time.perf_counter()
+                            segment_stats["thinkingCount"] += 1
+                            yield sse_event(
+                                "step_start",
+                                {
+                                    "segmentId": segment_id,
+                                    "stepId": thinking_step_id,
+                                    "stepType": "thinking",
+                                    "title": "正在思考中",
+                                    "startedAt": _now_iso(),
+                                    "collapsible": True,
+                                    "defaultCollapsed": False,
+                                },
+                            )
                             yield sse_event("thinking_start", {})
                         thinking_buffer += str(content or "")
+                        if segment_id and thinking_step_id:
+                            yield sse_event(
+                                "step_delta",
+                                {
+                                    "segmentId": segment_id,
+                                    "stepId": thinking_step_id,
+                                    "delta": str(content or ""),
+                                },
+                            )
                         yield sse_event("thinking_delta", {"content": str(content or "")})
 
                     elif chunk_type == "text_delta":
                         if in_thinking:
                             in_thinking = False
+                            if segment_id and thinking_step_id:
+                                yield sse_event(
+                                    "step_end",
+                                    {
+                                        "segmentId": segment_id,
+                                        "stepId": thinking_step_id,
+                                        "status": "completed",
+                                        "durationMs": _duration_ms(thinking_step_started_at),
+                                        "outputPreview": "思考完成",
+                                    },
+                                )
+                                thinking_step_id = None
                             yield sse_event("thinking_end", {})
+                        if segment_id is not None:
+                            yield sse_event(
+                                "segment_end",
+                                {
+                                    "segmentId": segment_id,
+                                    "status": "completed",
+                                    "durationMs": _duration_ms(segment_started_at),
+                                    **segment_stats,
+                                    "endedAt": _now_iso(),
+                                    "collapsible": True,
+                                    "defaultCollapsed": True,
+                                },
+                            )
+                            segment_id = None
+                            segment_stats = {}
                         accumulated_text += str(content or "")
                         # Stream text immediately — with native tool_calls,
                         # text and tool_calls are mutually exclusive
@@ -283,6 +429,10 @@ class AgentLoop:
                     elif chunk_type == "usage":
                         usage = chunk.get("usage")
                         if usage:
+                            if segment_stats is not None:
+                                segment_stats["totalTokens"] = int(
+                                    usage.get("input_tokens", 0) or 0
+                                ) + int(usage.get("output_tokens", 0) or 0)
                             yield sse_event(
                                 "context_usage",
                                 {
@@ -305,6 +455,18 @@ class AgentLoop:
                         break
 
                 if in_thinking:
+                    if segment_id and thinking_step_id:
+                        yield sse_event(
+                            "step_end",
+                            {
+                                "segmentId": segment_id,
+                                "stepId": thinking_step_id,
+                                "status": "completed",
+                                "durationMs": _duration_ms(thinking_step_started_at),
+                                "outputPreview": "思考完成",
+                            },
+                        )
+                        thinking_step_id = None
                     yield sse_event("thinking_end", {})
 
                 # --- Decide: tool calls or final text? ---
@@ -318,11 +480,48 @@ class AgentLoop:
                             args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
                         except json.JSONDecodeError:
                             args = {}
+                        if segment_id is None:
+                            segment_id = f"seg_{uuid.uuid4().hex[:10]}"
+                            segment_started_at = time.perf_counter()
+                            segment_stats = _reset_segment_stats()
+                            yield sse_event(
+                                "segment_start",
+                                {
+                                    "segmentId": segment_id,
+                                    "status": "running",
+                                    "startedAt": _now_iso(),
+                                    "collapsible": True,
+                                    "defaultCollapsed": False,
+                                },
+                            )
+                        call_id = str(tc.get("id", "") or f"call_{uuid.uuid4().hex[:8]}")
+                        tool_name = str(fn.get("name", ""))
+                        step_id = f"step_{call_id}"
+                        tool_step_ids[call_id] = step_id
+                        tool_step_started_at[call_id] = time.perf_counter()
+                        _bump_tool_stats(tool_name)
+                        title, subtitle = _tool_title(tool_name, args)
+                        yield sse_event(
+                            "step_start",
+                            {
+                                "segmentId": segment_id,
+                                "stepId": step_id,
+                                "stepType": _tool_step_type(tool_name),
+                                "title": title,
+                                "subtitle": subtitle,
+                                "toolName": tool_name,
+                                "toolCallId": call_id,
+                                "startedAt": _now_iso(),
+                                "collapsible": True,
+                                "defaultCollapsed": False,
+                                "inputPreview": json.dumps(args, ensure_ascii=False)[:1000],
+                            },
+                        )
                         yield sse_event(
                             "tool_call_start",
                             {
-                                "call_id": tc.get("id", ""),
-                                "tool": fn.get("name", ""),
+                                "call_id": call_id,
+                                "tool": tool_name,
                                 "arguments": args,
                             },
                         )
@@ -339,6 +538,48 @@ class AgentLoop:
 
                     # 3. Send results to frontend
                     for result in tool_results:
+                        step_id = tool_step_ids.get(result.call_id, f"step_{result.call_id}")
+                        duration_ms = (
+                            result.execution_time_ms
+                            if result.execution_time_ms is not None
+                            else _duration_ms(tool_step_started_at.get(result.call_id, time.perf_counter()))
+                        )
+                        yield sse_event(
+                            "step_end",
+                            {
+                                "segmentId": segment_id,
+                                "stepId": step_id,
+                                "status": "completed" if result.success else "failed",
+                                "durationMs": duration_ms,
+                                "outputPreview": self._preview_tool_result(result),
+                                "metadata": {
+                                    "toolName": result.tool_name,
+                                    "toolCallId": result.call_id,
+                                },
+                                "error": result.error_message if not result.success else None,
+                            },
+                        )
+                        if not result.success and segment_stats:
+                            segment_stats["errorCount"] += 1
+                            yield sse_event(
+                                "workflow_error",
+                                {
+                                    "segmentId": segment_id,
+                                    "stepId": step_id,
+                                    "errorId": f"err_{uuid.uuid4().hex[:10]}",
+                                    "severity": "error",
+                                    "errorType": "tool_failed",
+                                    "title": "工具执行失败",
+                                    "message": result.error_message or f"{result.tool_name} 执行失败",
+                                    "recoverable": True,
+                                    "actions": [
+                                        {"id": "retry_step", "label": "重试此步骤", "style": "primary"},
+                                        {"id": "skip_step", "label": "跳过并继续", "style": "secondary"},
+                                        {"id": "stop_task", "label": "停止任务", "style": "danger"},
+                                        {"id": "view_details", "label": "查看详情", "style": "secondary"},
+                                    ],
+                                },
+                            )
                         yield sse_event(
                             "tool_result",
                             {
@@ -362,7 +603,38 @@ class AgentLoop:
                         if isinstance(result.result, dict) and result.result.get("interaction_required"):
                             interaction = result.result.get("interaction", {})
                             self.set_waiting(conversation_id, interaction)
+                            if segment_id is not None:
+                                yield sse_event(
+                                    "segment_end",
+                                    {
+                                        "segmentId": segment_id,
+                                        "status": "waiting_user",
+                                        "durationMs": _duration_ms(segment_started_at),
+                                        **segment_stats,
+                                        "endedAt": _now_iso(),
+                                        "collapsible": True,
+                                        "defaultCollapsed": False,
+                                    },
+                                )
+                                segment_id = None
+                                segment_stats = {}
                             break
+
+                    if segment_id is not None:
+                        yield sse_event(
+                            "segment_end",
+                            {
+                                "segmentId": segment_id,
+                                "status": "completed" if segment_stats.get("errorCount", 0) == 0 else "failed",
+                                "durationMs": _duration_ms(segment_started_at),
+                                **segment_stats,
+                                "endedAt": _now_iso(),
+                                "collapsible": True,
+                                "defaultCollapsed": True,
+                            },
+                        )
+                        segment_id = None
+                        segment_stats = {}
 
                     # 5. Feed results back as native tool-response messages
                     context = await self._update_context_with_native_results(
@@ -408,6 +680,25 @@ class AgentLoop:
     # ------------------------------------------------------------------
     # Internal Methods
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _preview_tool_result(result: ToolCallResult) -> str:
+        """Create a short semantic preview for UI step cards."""
+        if not result.success:
+            return result.error_message or f"{result.tool_name} failed"
+        payload = result.result
+        if isinstance(payload, dict):
+            if payload.get("output"):
+                return str(payload.get("output"))[:500]
+            if payload.get("path"):
+                return f"完成：{payload.get('path')}"
+            if payload.get("count") is not None:
+                return f"完成，共 {payload.get('count')} 项"
+            if payload.get("success") is True:
+                return "执行完成"
+        if isinstance(payload, str):
+            return payload[:500]
+        return "执行完成"
 
     async def _build_context(
         self,

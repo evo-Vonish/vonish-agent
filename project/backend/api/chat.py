@@ -137,6 +137,8 @@ async def chat_stream(
     tool_calls_by_id: dict[str, dict[str, Any]] = {}
     active_thinking_segment: dict[str, Any] | None = None
     active_text_segment: dict[str, Any] | None = None
+    execution_segments_by_id: dict[str, dict[str, Any]] = {}
+    active_execution_segment_id: str | None = None
 
     # Streaming XML tool-call filter state machine
     _xml_buf = ""       # buffered partial text for filtering
@@ -292,6 +294,186 @@ async def chat_stream(
         if data.get("duration_ms") is not None:
             tool_call["duration"] = data.get("duration_ms")
 
+    def _segment_id(data: dict[str, Any]) -> str:
+        return str(data.get("segmentId") or data.get("id") or "")
+
+    def _step_id(data: dict[str, Any]) -> str:
+        return str(data.get("stepId") or data.get("id") or "")
+
+    def _start_execution_segment(data: dict[str, Any]) -> None:
+        nonlocal active_execution_segment_id, active_text_segment, active_thinking_segment
+        segment_id = _segment_id(data) or f"seg-{len(execution_segments_by_id) + 1}"
+        execution = {
+            "id": segment_id,
+            "status": str(data.get("status") or "running"),
+            "title": str(data.get("title") or "处理区间"),
+            "goal": data.get("goal"),
+            "startedAt": data.get("startedAt"),
+            "endedAt": data.get("endedAt"),
+            "durationMs": data.get("durationMs"),
+            "thinkingCount": int(data.get("thinkingCount") or 0),
+            "toolCallCount": int(data.get("toolCallCount") or 0),
+            "commandCount": int(data.get("commandCount") or 0),
+            "fileReadCount": int(data.get("fileReadCount") or 0),
+            "fileWriteCount": int(data.get("fileWriteCount") or 0),
+            "fileEditCount": int(data.get("fileEditCount") or 0),
+            "webRequestCount": int(data.get("webRequestCount") or 0),
+            "recallCount": int(data.get("recallCount") or 0),
+            "errorCount": int(data.get("errorCount") or 0),
+            "totalTokens": data.get("totalTokens"),
+            "steps": [],
+            "errors": [],
+            "collapsible": bool(data.get("collapsible", True)),
+            "defaultCollapsed": bool(data.get("defaultCollapsed", False)),
+        }
+        execution_segments_by_id[segment_id] = execution
+        assistant_segments.append(
+            {
+                "id": f"execution-{segment_id}",
+                "type": "execution",
+                "execution": execution,
+            }
+        )
+        active_execution_segment_id = segment_id
+        active_text_segment = None
+        active_thinking_segment = None
+
+    def _current_execution(data: dict[str, Any]) -> dict[str, Any] | None:
+        segment_id = _segment_id(data) or active_execution_segment_id
+        if not segment_id:
+            return None
+        return execution_segments_by_id.get(segment_id)
+
+    def _update_execution_segment(data: dict[str, Any]) -> None:
+        segment = _current_execution(data)
+        if not segment:
+            return
+        for key in (
+            "status",
+            "title",
+            "goal",
+            "startedAt",
+            "endedAt",
+            "durationMs",
+            "thinkingCount",
+            "toolCallCount",
+            "commandCount",
+            "fileReadCount",
+            "fileWriteCount",
+            "fileEditCount",
+            "webRequestCount",
+            "recallCount",
+            "errorCount",
+            "totalTokens",
+            "summary",
+            "collapsible",
+            "defaultCollapsed",
+        ):
+            if key in data:
+                segment[key] = data.get(key)
+
+    def _end_execution_segment(data: dict[str, Any]) -> None:
+        nonlocal active_execution_segment_id
+        segment = _current_execution(data)
+        if not segment:
+            return
+        _update_execution_segment(data)
+        segment["status"] = str(data.get("status") or "completed")
+        segment["defaultCollapsed"] = bool(data.get("defaultCollapsed", True))
+        if active_execution_segment_id == segment.get("id"):
+            active_execution_segment_id = None
+
+    def _start_execution_step(data: dict[str, Any]) -> None:
+        segment = _current_execution(data)
+        if not segment:
+            return
+        step_id = _step_id(data) or f"step-{len(segment.get('steps', [])) + 1}"
+        step = {
+            "id": step_id,
+            "segmentId": str(segment.get("id") or ""),
+            "type": str(data.get("stepType") or data.get("type") or "tool_call"),
+            "status": str(data.get("status") or "running"),
+            "title": str(data.get("title") or "执行步骤"),
+            "subtitle": data.get("subtitle"),
+            "startedAt": data.get("startedAt"),
+            "endedAt": data.get("endedAt"),
+            "durationMs": data.get("durationMs"),
+            "toolName": data.get("toolName"),
+            "toolCallId": data.get("toolCallId"),
+            "inputPreview": data.get("inputPreview"),
+            "outputPreview": data.get("outputPreview"),
+            "content": data.get("content") or "",
+            "error": data.get("error"),
+            "metadata": data.get("metadata"),
+            "collapsible": bool(data.get("collapsible", True)),
+            "defaultCollapsed": bool(data.get("defaultCollapsed", False)),
+        }
+        steps = segment.setdefault("steps", [])
+        existing = next((idx for idx, item in enumerate(steps) if item.get("id") == step_id), None)
+        if existing is None:
+            steps.append(step)
+        else:
+            steps[existing].update(step)
+
+    def _append_execution_step_delta(data: dict[str, Any]) -> None:
+        segment = _current_execution(data)
+        step_id = _step_id(data)
+        if not segment or not step_id:
+            return
+        delta = str(data.get("delta") or data.get("content") or "")
+        for step in segment.get("steps", []):
+            if step.get("id") == step_id:
+                step["content"] = str(step.get("content") or "") + delta
+                return
+
+    def _end_execution_step(data: dict[str, Any]) -> None:
+        segment = _current_execution(data)
+        step_id = _step_id(data)
+        if not segment or not step_id:
+            return
+        for step in segment.get("steps", []):
+            if step.get("id") == step_id:
+                step["status"] = str(data.get("status") or "completed")
+                for key in ("endedAt", "durationMs", "outputPreview", "error", "metadata"):
+                    if key in data:
+                        step[key] = data.get(key)
+                step["defaultCollapsed"] = bool(data.get("defaultCollapsed", True))
+                return
+
+    def _append_workflow_error(data: dict[str, Any]) -> None:
+        segment = _current_execution(data)
+        if not segment:
+            return
+        error_id = str(data.get("errorId") or data.get("id") or f"err-{len(segment.get('errors', [])) + 1}")
+        error = {
+            "id": error_id,
+            "segmentId": str(segment.get("id") or ""),
+            "stepId": data.get("stepId"),
+            "severity": str(data.get("severity") or "error"),
+            "errorType": str(data.get("errorType") or "workflow_error"),
+            "title": str(data.get("title") or "工作流异常"),
+            "message": str(data.get("message") or "处理流程异常中断。"),
+            "recoverable": bool(data.get("recoverable", True)),
+            "actions": data.get("actions") if isinstance(data.get("actions"), list) else [],
+            "detailsRef": data.get("detailsRef"),
+        }
+        segment.setdefault("errors", []).append(error)
+        segment["status"] = "failed"
+        segment["errorCount"] = max(int(segment.get("errorCount") or 0), len(segment.get("errors", [])))
+        segment.setdefault("steps", []).append(
+            {
+                "id": f"error-step-{error_id}",
+                "segmentId": str(segment.get("id") or ""),
+                "type": "error_notice",
+                "status": "failed",
+                "title": error["title"],
+                "subtitle": error["message"],
+                "error": error["message"],
+                "collapsible": True,
+                "defaultCollapsed": False,
+            }
+        )
+
     async def event_generator():
         """Generate SSE events from the agent loop and collect response."""
         nonlocal assistant_parts, thinking_parts
@@ -360,23 +542,42 @@ async def chat_stream(
                     except Exception:
                         yield event_str
                     continue
-                if event_name == "thinking_start":
-                    _append_thinking_delta("")
+                if event_name == "segment_start":
+                    _start_execution_segment(event_data)
+                elif event_name == "segment_update":
+                    _update_execution_segment(event_data)
+                elif event_name == "segment_end":
+                    _end_execution_segment(event_data)
+                elif event_name == "step_start":
+                    _start_execution_step(event_data)
+                elif event_name == "step_delta":
+                    _append_execution_step_delta(event_data)
+                elif event_name == "step_end":
+                    _end_execution_step(event_data)
+                elif event_name == "workflow_error":
+                    _append_workflow_error(event_data)
+                elif event_name == "thinking_start":
+                    if active_execution_segment_id is None:
+                        _append_thinking_delta("")
                 elif event_name == "thinking_delta":
                     try:
                         _content = event_data.get("content", "")
                         if _content:
                             delta = str(_content)
                             thinking_parts.append(delta)
-                            _append_thinking_delta(delta)
+                            if active_execution_segment_id is None:
+                                _append_thinking_delta(delta)
                     except Exception:
                         pass
                 elif event_name == "thinking_end":
-                    _finish_thinking()
+                    if active_execution_segment_id is None:
+                        _finish_thinking()
                 elif event_name == "tool_call_start":
-                    _start_tool_call(event_data)
+                    if active_execution_segment_id is None:
+                        _start_tool_call(event_data)
                 elif event_name == "tool_result":
-                    _finish_tool_call(event_data)
+                    if active_execution_segment_id is None:
+                        _finish_tool_call(event_data)
                 elif event_name in {"message_end", "aborted", "error"}:
                     _finish_thinking()
                 yield event_str

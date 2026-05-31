@@ -170,4 +170,21 @@
   .i18n-fade {
     transition: opacity 120ms ease;
   }
+
+  .smooth-streaming-text {
+    animation: smooth-text-in 120ms ease-out;
+  }
+
+  @keyframes smooth-text-in {
+    from {
+      opacity: 0.72;
+      filter: blur(2px);
+      transform: translateY(1px);
+    }
+    to {
+      opacity: 1;
+      filter: blur(0);
+      transform: translateY(0);
+    }
+  }
 }

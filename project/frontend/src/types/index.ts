@@ -61,7 +61,91 @@ export type MessageSegment =
       id: string;
       type: 'tool';
       tool: ToolCall;
+    }
+  | {
+      id: string;
+      type: 'execution';
+      execution: ExecutionSegment;
     };
+
+export interface WorkflowErrorAction {
+  id: string;
+  label: string;
+  style?: 'primary' | 'secondary' | 'danger';
+}
+
+export interface WorkflowError {
+  id: string;
+  segmentId?: string;
+  stepId?: string;
+  severity: 'info' | 'warning' | 'error' | 'fatal';
+  errorType: string;
+  title: string;
+  message: string;
+  recoverable: boolean;
+  actions: WorkflowErrorAction[];
+  detailsRef?: string;
+}
+
+export interface ExecutionStep {
+  id: string;
+  segmentId: string;
+  type:
+    | 'thinking'
+    | 'tool_call'
+    | 'tool_result'
+    | 'file_read'
+    | 'file_write'
+    | 'file_edit'
+    | 'command'
+    | 'web_search'
+    | 'web_fetch'
+    | 'recall'
+    | 'user_interaction'
+    | 'system_notice'
+    | 'error_notice';
+  status: 'running' | 'completed' | 'failed' | 'cancelled' | 'skipped' | 'retrying';
+  title: string;
+  subtitle?: string;
+  startedAt?: string;
+  endedAt?: string;
+  durationMs?: number;
+  toolName?: string;
+  toolCallId?: string;
+  inputPreview?: string;
+  outputPreview?: string;
+  content?: string;
+  error?: string;
+  metadata?: Record<string, unknown>;
+  collapsible?: boolean;
+  defaultCollapsed?: boolean;
+  raw?: unknown;
+}
+
+export interface ExecutionSegment {
+  id: string;
+  status: 'running' | 'completed' | 'failed' | 'cancelled' | 'waiting_user';
+  title?: string;
+  goal?: string;
+  startedAt?: string;
+  endedAt?: string;
+  durationMs?: number;
+  thinkingCount: number;
+  toolCallCount: number;
+  commandCount: number;
+  fileReadCount: number;
+  fileWriteCount: number;
+  fileEditCount: number;
+  webRequestCount: number;
+  recallCount: number;
+  errorCount: number;
+  totalTokens?: number;
+  steps: ExecutionStep[];
+  errors?: WorkflowError[];
+  summary?: string;
+  collapsible?: boolean;
+  defaultCollapsed?: boolean;
+}
 
 export interface ToolCall {
   id: string;

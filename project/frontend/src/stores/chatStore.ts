@@ -5,9 +5,12 @@ import type {
   Model,
   ContextProfile,
   ContextUsage,
+  ExecutionSegment,
+  ExecutionStep,
   ToolCall,
   MessageSegment,
   UploadedFileMeta,
+  WorkflowError,
 } from '@/types';
 import { mockContextProfile, contextProfiles } from '@/services/mockData';
 import {
@@ -273,6 +276,162 @@ function optionalNumber(value: unknown): number | undefined {
   return undefined;
 }
 
+function executionStatus(value: unknown): ExecutionSegment['status'] {
+  const status = String(value ?? '');
+  if (
+    status === 'running' ||
+    status === 'completed' ||
+    status === 'failed' ||
+    status === 'cancelled' ||
+    status === 'waiting_user'
+  ) {
+    return status;
+  }
+  return 'running';
+}
+
+function executionStepStatus(value: unknown): ExecutionStep['status'] {
+  const status = String(value ?? '');
+  if (
+    status === 'running' ||
+    status === 'completed' ||
+    status === 'failed' ||
+    status === 'cancelled' ||
+    status === 'skipped' ||
+    status === 'retrying'
+  ) {
+    return status;
+  }
+  return 'running';
+}
+
+function executionStepType(value: unknown): ExecutionStep['type'] {
+  const type = String(value ?? '');
+  if (
+    type === 'thinking' ||
+    type === 'tool_call' ||
+    type === 'tool_result' ||
+    type === 'file_read' ||
+    type === 'file_write' ||
+    type === 'file_edit' ||
+    type === 'command' ||
+    type === 'web_search' ||
+    type === 'web_fetch' ||
+    type === 'recall' ||
+    type === 'user_interaction' ||
+    type === 'system_notice' ||
+    type === 'error_notice'
+  ) {
+    return type;
+  }
+  return 'tool_call';
+}
+
+function numberCount(value: unknown): number {
+  return optionalNumber(value) ?? 0;
+}
+
+function normalizeWorkflowError(raw: unknown, fallbackSegmentId?: string): WorkflowError {
+  const source = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const actions = Array.isArray(source.actions)
+    ? source.actions.reduce<WorkflowError['actions']>((items, item) => {
+          const action = item && typeof item === 'object' ? (item as Record<string, unknown>) : {};
+          const id = String(action.id ?? '').trim();
+          const label = String(action.label ?? '').trim();
+          if (!id || !label) return items;
+          const rawStyle = String(action.style ?? 'secondary');
+          items.push({
+            id,
+            label,
+            style:
+              rawStyle === 'primary' || rawStyle === 'secondary' || rawStyle === 'danger'
+                ? rawStyle
+                : 'secondary',
+          });
+          return items;
+        }, [])
+    : [];
+  const severity = String(source.severity ?? 'error');
+  return {
+    id: String(source.id || source.errorId || `workflow-error-${generateId()}`),
+    segmentId: source.segmentId ? String(source.segmentId) : fallbackSegmentId,
+    stepId: source.stepId ? String(source.stepId) : undefined,
+    severity:
+      severity === 'info' || severity === 'warning' || severity === 'error' || severity === 'fatal'
+        ? severity
+        : 'error',
+    errorType: String(source.errorType ?? 'workflow_error'),
+    title: String(source.title ?? '工作流异常'),
+    message: String(source.message ?? '处理流程异常中断。'),
+    recoverable: Boolean(source.recoverable ?? true),
+    actions,
+    detailsRef: source.detailsRef ? String(source.detailsRef) : undefined,
+  };
+}
+
+function normalizeExecutionStep(raw: unknown, segmentId: string): ExecutionStep {
+  const source = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  return {
+    id: String(source.id || source.stepId || `step-${generateId()}`),
+    segmentId: String(source.segmentId || segmentId),
+    type: executionStepType(source.type ?? source.stepType),
+    status: executionStepStatus(source.status),
+    title: String(source.title || '执行步骤'),
+    subtitle: source.subtitle ? String(source.subtitle) : undefined,
+    startedAt: source.startedAt ? String(source.startedAt) : undefined,
+    endedAt: source.endedAt ? String(source.endedAt) : undefined,
+    durationMs: optionalNumber(source.durationMs),
+    toolName: source.toolName ? String(source.toolName) : undefined,
+    toolCallId: source.toolCallId ? String(source.toolCallId) : undefined,
+    inputPreview: source.inputPreview ? String(source.inputPreview) : undefined,
+    outputPreview: source.outputPreview ? String(source.outputPreview) : undefined,
+    content: source.content ? String(source.content) : undefined,
+    error: source.error ? String(source.error) : undefined,
+    metadata:
+      source.metadata && typeof source.metadata === 'object'
+        ? (source.metadata as Record<string, unknown>)
+        : undefined,
+    collapsible: Boolean(source.collapsible ?? true),
+    defaultCollapsed: Boolean(source.defaultCollapsed ?? source.status !== 'running'),
+    raw: source.raw,
+  };
+}
+
+function normalizeExecutionSegment(raw: unknown): ExecutionSegment {
+  const source = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const id = String(source.id || source.segmentId || `segment-${generateId()}`);
+  const steps = Array.isArray(source.steps)
+    ? source.steps.map((step) => normalizeExecutionStep(step, id))
+    : [];
+  const errors = Array.isArray(source.errors)
+    ? source.errors.map((error) => normalizeWorkflowError(error, id))
+    : [];
+  return {
+    id,
+    status: executionStatus(source.status),
+    title: source.title ? String(source.title) : '处理区间',
+    goal: source.goal ? String(source.goal) : undefined,
+    startedAt: source.startedAt ? String(source.startedAt) : undefined,
+    endedAt: source.endedAt ? String(source.endedAt) : undefined,
+    durationMs: optionalNumber(source.durationMs),
+    thinkingCount: numberCount(source.thinkingCount),
+    toolCallCount: numberCount(source.toolCallCount),
+    commandCount: numberCount(source.commandCount),
+    fileReadCount: numberCount(source.fileReadCount),
+    fileWriteCount: numberCount(source.fileWriteCount),
+    fileEditCount: numberCount(source.fileEditCount),
+    webRequestCount: numberCount(source.webRequestCount),
+    recallCount: numberCount(source.recallCount),
+    errorCount: numberCount(source.errorCount),
+    totalTokens: optionalNumber(source.totalTokens),
+    steps,
+    errors,
+    summary: source.summary ? String(source.summary) : undefined,
+    collapsible: Boolean(source.collapsible ?? true),
+    defaultCollapsed: Boolean(source.defaultCollapsed ?? source.status !== 'running'),
+  };
+}
+
 function normalizeToolCall(raw: unknown): ToolCall {
   const source = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
   const rawStatus = String(source.status ?? '');
@@ -332,6 +491,13 @@ function normalizeAssistantSegments(
           id: String(source.id || `tool-${tool.id}`),
           type: 'tool',
           tool,
+        });
+      } else if (source.type === 'execution') {
+        const execution = normalizeExecutionSegment(source.execution ?? source);
+        normalized.push({
+          id: String(source.id || `execution-${execution.id}`),
+          type: 'execution',
+          execution,
         });
       }
     });
@@ -483,6 +649,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const selectedModelForRequest = get().selectedModelId;
     let activeThinkingSegmentId: string | null = null;
     let activeTextSegmentId: string | null = null;
+    let activeExecutionSegmentId: string | null = null;
+    let structuredExecutionActive = false;
     let showingFileProcessing = hasAttachments;
     let completedSend = false;
 
@@ -501,6 +669,51 @@ export const useChatStore = create<ChatState>((set, get) => ({
       get().updateMessage(currentMsgId, {
         segments: updateSegment(current?.segments, segmentId, updater),
       });
+    };
+
+    const updateExecutionSegment = (
+      segmentId: string,
+      updater: (segment: ExecutionSegment) => ExecutionSegment,
+    ) => {
+      updateSegments(`execution-${segmentId}`, (segment) =>
+        segment.type === 'execution'
+          ? { ...segment, execution: updater(segment.execution) }
+          : segment,
+      );
+    };
+
+    const upsertExecutionStep = (segmentId: string, step: ExecutionStep) => {
+      updateExecutionSegment(segmentId, (segment) => {
+        const index = segment.steps.findIndex((item) => item.id === step.id);
+        const steps =
+          index >= 0
+            ? segment.steps.map((item) => (item.id === step.id ? { ...item, ...step } : item))
+            : [...segment.steps, step];
+        return { ...segment, steps };
+      });
+    };
+
+    const appendWorkflowError = (segmentId: string, error: WorkflowError) => {
+      updateExecutionSegment(segmentId, (segment) => ({
+        ...segment,
+        status: 'failed',
+        errorCount: Math.max(segment.errorCount, (segment.errors?.length ?? 0) + 1),
+        errors: [...(segment.errors ?? []), error],
+        steps: [
+          ...segment.steps,
+          {
+            id: `error-step-${error.id}`,
+            segmentId,
+            type: 'error_notice',
+            status: 'failed',
+            title: error.title,
+            subtitle: error.message,
+            error: error.message,
+            collapsible: true,
+            defaultCollapsed: false,
+          },
+        ],
+      }));
     };
 
     try {
@@ -533,7 +746,120 @@ export const useChatStore = create<ChatState>((set, get) => ({
             showingFileProcessing = false;
             get().updateMessage(currentMsgId, { content: '' });
           }
+          if (event === 'segment_start') {
+            const execution = normalizeExecutionSegment({
+              ...data,
+              status: data.status ?? 'running',
+              steps: [],
+              errors: [],
+            });
+            activeExecutionSegmentId = execution.id;
+            structuredExecutionActive = true;
+            activeTextSegmentId = null;
+            activeThinkingSegmentId = null;
+            appendSegment({
+              id: `execution-${execution.id}`,
+              type: 'execution',
+              execution,
+            });
+            return;
+          }
+
+          if (event === 'segment_update') {
+            const segmentId = String(data.id ?? activeExecutionSegmentId ?? '');
+            if (!segmentId) return;
+            updateExecutionSegment(segmentId, (segment) => ({
+              ...segment,
+              ...normalizeExecutionSegment({ ...segment, ...data, steps: segment.steps, errors: segment.errors }),
+            }));
+            return;
+          }
+
+          if (event === 'segment_end') {
+            const segmentId = String(data.id ?? activeExecutionSegmentId ?? '');
+            if (!segmentId) return;
+            updateExecutionSegment(segmentId, (segment) => ({
+              ...segment,
+              status: executionStatus(data.status ?? 'completed'),
+              endedAt: data.endedAt ? String(data.endedAt) : segment.endedAt,
+              durationMs: optionalNumber(data.durationMs) ?? segment.durationMs,
+              thinkingCount: numberCount(data.thinkingCount ?? segment.thinkingCount),
+              toolCallCount: numberCount(data.toolCallCount ?? segment.toolCallCount),
+              commandCount: numberCount(data.commandCount ?? segment.commandCount),
+              fileReadCount: numberCount(data.fileReadCount ?? segment.fileReadCount),
+              fileWriteCount: numberCount(data.fileWriteCount ?? segment.fileWriteCount),
+              fileEditCount: numberCount(data.fileEditCount ?? segment.fileEditCount),
+              webRequestCount: numberCount(data.webRequestCount ?? segment.webRequestCount),
+              recallCount: numberCount(data.recallCount ?? segment.recallCount),
+              errorCount: numberCount(data.errorCount ?? segment.errorCount),
+              totalTokens: optionalNumber(data.totalTokens) ?? segment.totalTokens,
+              defaultCollapsed: true,
+            }));
+            if (activeExecutionSegmentId === segmentId) activeExecutionSegmentId = null;
+            structuredExecutionActive = false;
+            return;
+          }
+
+          if (event === 'step_start') {
+            const segmentId = String(data.segmentId ?? activeExecutionSegmentId ?? '');
+            if (!segmentId) return;
+            upsertExecutionStep(segmentId, normalizeExecutionStep(data, segmentId));
+            return;
+          }
+
+          if (event === 'step_delta') {
+            const segmentId = String(data.segmentId ?? activeExecutionSegmentId ?? '');
+            const stepId = String(data.stepId ?? data.id ?? '');
+            if (!segmentId || !stepId) return;
+            const delta = String(data.delta ?? data.content ?? '');
+            updateExecutionSegment(segmentId, (segment) => ({
+              ...segment,
+              steps: segment.steps.map((step) =>
+                step.id === stepId
+                  ? { ...step, content: `${step.content ?? ''}${delta}` }
+                  : step,
+              ),
+            }));
+            return;
+          }
+
+          if (event === 'step_end') {
+            const segmentId = String(data.segmentId ?? activeExecutionSegmentId ?? '');
+            const stepId = String(data.stepId ?? data.id ?? '');
+            if (!segmentId || !stepId) return;
+            updateExecutionSegment(segmentId, (segment) => ({
+              ...segment,
+              steps: segment.steps.map((step) =>
+                step.id === stepId
+                  ? {
+                      ...step,
+                      status: executionStepStatus(data.status ?? 'completed'),
+                      endedAt: data.endedAt ? String(data.endedAt) : step.endedAt,
+                      durationMs: optionalNumber(data.durationMs) ?? step.durationMs,
+                      outputPreview: data.outputPreview ? String(data.outputPreview) : step.outputPreview,
+                      error: data.error ? String(data.error) : step.error,
+                      metadata:
+                        data.metadata && typeof data.metadata === 'object'
+                          ? (data.metadata as Record<string, unknown>)
+                          : step.metadata,
+                      defaultCollapsed: true,
+                    }
+                  : step,
+              ),
+            }));
+            return;
+          }
+
+          if (event === 'workflow_error') {
+            const segmentId = String(data.segmentId ?? activeExecutionSegmentId ?? '');
+            const error = normalizeWorkflowError(data, segmentId || undefined);
+            if (segmentId) appendWorkflowError(segmentId, error);
+            set({ apiError: `${error.title}: ${error.message}` });
+            return;
+          }
+
           if (event === 'thinking_start') {
+            if (structuredExecutionActive || activeExecutionSegmentId) return;
             activeThinkingSegmentId = generateId();
             activeTextSegmentId = null;
             appendSegment({
@@ -547,6 +873,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
 
           if (event === 'thinking_delta') {
+            if (structuredExecutionActive || activeExecutionSegmentId) return;
             const delta = String(data.content ?? '');
             if (!activeThinkingSegmentId) {
               activeThinkingSegmentId = generateId();
@@ -566,6 +893,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
 
           if (event === 'thinking_end') {
+            if (structuredExecutionActive || activeExecutionSegmentId) return;
             const current = get().messages.find((m) => m.id === currentMsgId);
             const finishedId = activeThinkingSegmentId;
             const finished = current?.segments?.find(
@@ -616,6 +944,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
 
           if (event === 'tool_call_start') {
+            if (structuredExecutionActive || activeExecutionSegmentId) return;
             const callId = String(data.call_id ?? '');
             const toolName = String(data.tool ?? '');
             if (isInteractiveToolName(toolName)) {
@@ -670,6 +999,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
 
           if (event === 'tool_result') {
+            if (structuredExecutionActive || activeExecutionSegmentId) return;
             const callId = String(data.call_id ?? '');
             const toolName = String(data.tool ?? '');
             const success = Boolean(data.success);
