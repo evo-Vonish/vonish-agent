@@ -191,6 +191,8 @@ class AgentLoop:
                 return "web_fetch"
             if tool_name in {"ask_user_question", "request_approval"}:
                 return "user_interaction"
+            if tool_name in {"git_status", "git_diff", "git_history"}:
+                return "tool_call"
             return "tool_call"
 
         def _tool_title(tool_name: str, args: dict[str, Any]) -> tuple[str, str]:
@@ -208,6 +210,12 @@ class AgentLoop:
                 return "正在抓取网页", str(args.get("url") or "")
             if tool_name == "ipython":
                 return "正在运行 Python 代码", ""
+            if tool_name == "git_status":
+                return "Git Status", "检查当前仓库状态"
+            if tool_name == "git_diff":
+                return "Git Diff", str(args.get("file_path") or args.get("scope") or "working")
+            if tool_name == "git_history":
+                return "Git History", str(args.get("file_path") or args.get("mode") or "log")
             if tool_name == "ask_user_question":
                 return "等待用户回答", str(args.get("question") or "")
             if tool_name == "request_approval":
@@ -786,19 +794,16 @@ class AgentLoop:
         lines: list[str] = [
             "",
             "## Uploaded Files",
-            "The user uploaded files for this turn. Files are saved inside the current workspace and can be read with file tools.",
+            "User uploaded files into the current workspace. Do not assume file contents.",
+            "Use read_file, shell_command, ipython, or other workspace tools to inspect files when needed.",
         ]
 
         for resource in resources:
             name = resource.original_name or resource.title or resource.workspace_path or resource.uri
             path = resource.workspace_path or resource.uri
-            lines.append(
-                f"- {name} ({resource.mime_type or 'unknown'}, status: {resource.status or 'uploaded'}, path: {path})"
-            )
-            if resource.error:
-                lines.append(f"  Parse note: {resource.error}")
-            if resource.context_text:
-                lines.append(resource.context_text)
+            mime = resource.mime_type or 'unknown'
+            size = f"{resource.size / 1024:.0f} KB" if hasattr(resource, 'size') and resource.size else ''
+            lines.append(f"- {path}  ({mime}{', ' + size if size else ''})")
 
         return f"{system_prompt}\n" + "\n".join(lines)
 

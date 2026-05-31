@@ -64,7 +64,15 @@ async def run_git(root: Path, *args: str, timeout: float = 20.0) -> tuple[int, s
 
 async def is_git_repo(root: Path) -> bool:
     code, stdout, _ = await run_git(root, "rev-parse", "--is-inside-work-tree", timeout=5.0)
-    return code == 0 and stdout.strip() == "true"
+    if code != 0 or stdout.strip() != "true":
+        return False
+    top_code, top_stdout, _ = await run_git(root, "rev-parse", "--show-toplevel", timeout=5.0)
+    if top_code != 0:
+        return False
+    try:
+        return Path(top_stdout.strip()).resolve() == root.resolve()
+    except Exception:
+        return False
 
 
 def _status_bucket(code: str) -> str:

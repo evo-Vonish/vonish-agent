@@ -287,15 +287,15 @@ export const useToolStore = create<ToolState>((set, get) => ({
         name: t.name,
         description: t.description,
         category: t.category as ToolCategoryType,
-        capabilities: (t.requires_confirmation
+        capabilities: (t.requires_confirmation || t.requires_approval
           ? ['requires_approval']
           : ['read_only']) as ToolCapability[],
-        approvalLevel: (t.requires_confirmation
+        approvalLevel: ((t.requires_confirmation || t.requires_approval)
           ? 'required'
           : t.category === 'file_ops'
             ? 'suggest'
             : 'auto') as ApprovalLevel,
-        isEnabled: true,
+        isEnabled: t.enabled ?? true,
         isReadOnly: !t.requires_confirmation,
         supportsParallel: true,
         schema: t.schema,

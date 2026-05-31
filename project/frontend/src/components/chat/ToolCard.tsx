@@ -1,8 +1,9 @@
-import { useState } from 'react';
 import { Check, ChevronDown, ChevronRight, Loader2, TerminalSquare, Wrench, XCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { ToolCall } from '@/types';
 import { formatDuration } from '@/lib/utils';
+import { ExecutionCollapse } from './ExecutionCollapse';
+import { useExecutionDisclosure } from './useExecutionDisclosure';
 
 interface ToolCardProps {
   tool: ToolCall;
@@ -10,7 +11,14 @@ interface ToolCardProps {
 }
 
 export function ToolCard({ tool, className }: ToolCardProps) {
-  const [expanded, setExpanded] = useState(false);
+  const disclosure = useExecutionDisclosure({
+    id: tool.id,
+    status: tool.status,
+    runningStatuses: ['running'],
+    failedStatuses: ['error'],
+    terminalStatuses: ['success', 'error'],
+  });
+  const expanded = disclosure.expanded;
 
   const statusConfig: Record<string, { icon: React.ReactNode; label: string; color: string; title: string }> = {
     pending: {
@@ -49,18 +57,37 @@ export function ToolCard({ tool, className }: ToolCardProps) {
 
   return (
     <div className={cn('relative space-y-2 pl-9', config.color, className)}>
-      {expanded && <span className="absolute left-[9px] top-7 bottom-0 w-px bg-white/14" />}
-      <span className="absolute left-0 top-0 z-10 flex h-5 w-5 items-center justify-center rounded-full border border-white/12 bg-background text-foreground-muted shadow-[0_0_0_4px_hsl(var(--background))]">
+      {expanded && (
+        <span
+          className={cn(
+            'workflow-rail-line workflow-rail-line-short',
+            tool.status === 'running' && 'workflow-rail-line-running',
+            tool.status === 'error' && 'workflow-rail-line-error',
+          )}
+        />
+      )}
+      <span
+        className={cn(
+          'workflow-rail-icon',
+          tool.status === 'running' && 'workflow-rail-icon-running',
+          tool.status === 'error' && 'workflow-rail-icon-error',
+        )}
+      >
         {tool.status === 'running' ? <Loader2 className="h-4 w-4 animate-spin" /> : tool.status === 'error' ? <XCircle className="h-4 w-4 text-error" /> : icon}
       </span>
       <button
-        onClick={() => setExpanded(!expanded)}
+        onClick={() => disclosure.toggle()}
         className={cn(
           'flex max-w-full items-center gap-2 text-left text-[15px] font-medium transition-colors hover:text-foreground',
           tool.status === 'error' && 'hover:text-error'
         )}
       >
-        <span className="min-w-0 truncate">
+        <span
+          className="execution-title min-w-0 truncate"
+          data-motion={disclosure.titleMotion}
+          data-tone={disclosure.tone}
+          data-kind={tool.name === 'shell_command' ? 'command' : 'tool'}
+        >
           {config.title}
           <span className="ml-1 text-foreground-subtle">{tool.name}</span>
         </span>
@@ -75,7 +102,7 @@ export function ToolCard({ tool, className }: ToolCardProps) {
           <ChevronRight className="w-3.5 h-3.5 flex-shrink-0 opacity-60" />
         )}
       </button>
-      {expanded && (
+      <ExecutionCollapse open={expanded}>
         <div className="codex-panel-reveal relative overflow-hidden rounded-[10px] bg-[#252525] text-[13px] shadow-sm">
           <div className="border-b border-white/5 px-3 py-2 text-sm text-foreground-muted">
             {tool.name === 'shell_command' ? 'Shell' : 'Tool'}
@@ -109,7 +136,7 @@ export function ToolCard({ tool, className }: ToolCardProps) {
             <span>{config.label}</span>
           </div>
         </div>
-      )}
+      </ExecutionCollapse>
     </div>
   );
 }

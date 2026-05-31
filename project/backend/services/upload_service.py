@@ -48,7 +48,6 @@ class UploadResult(BaseModel):
     text_length: int = 0
     text_preview: str = ""
     context_policy: str = "none"
-    context_text: str = ""
     resource_uri: str = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
     error: str | None = None
@@ -81,7 +80,6 @@ class UploadResult(BaseModel):
             "textLength": self.text_length,
             "textPreview": self.text_preview,
             "contextPolicy": self.context_policy,
-            "contextText": self.context_text,
             "resourceUri": self.resource_uri,
             "metadata": self.metadata,
             "error": self.error,
@@ -111,43 +109,6 @@ def _context_policy(ext: str, text_length: int, is_image: bool) -> str:
     if text_length <= MAX_CONTEXT_PER_FILE:
         return "normal"
     return "compressed"
-
-
-def _build_context_text(
-    *,
-    original_name: str,
-    workspace_path: str,
-    ext: str,
-    is_image: bool,
-    extracted_text: str,
-    parse_error: str | None,
-) -> tuple[str, str]:
-    if is_image:
-        text = (
-            f"User uploaded an image file: {original_name}. "
-            f"It has been saved to workspace path `{workspace_path}`. "
-            "OCR/vision extraction has not been performed."
-        )
-        return "weak", text
-
-    if not extracted_text:
-        text = (
-            f"User uploaded file `{original_name}` saved at `{workspace_path}`, "
-            f"but no text was injected. Reason: {parse_error or 'empty extracted text'}."
-        )
-        return "none", text
-
-    clipped = extracted_text[:MAX_CONTEXT_PER_FILE]
-    policy = _context_policy(ext, len(extracted_text), is_image=False)
-    if len(extracted_text) > MAX_CONTEXT_PER_FILE:
-        clipped += "\n\n[Content clipped. The full file is saved in workspace and can be read with file tools.]"
-
-    text = (
-        f"User uploaded file `{original_name}`. It is saved at `{workspace_path}` and can be read with file tools.\n"
-        f"Extracted text length: {len(extracted_text)} characters. Context policy: {policy}.\n\n"
-        f"Extracted content:\n{clipped}"
-    )
-    return policy, text
 
 
 class UploadService:
@@ -237,15 +198,6 @@ class UploadService:
                 status = "failed"
                 error = parse_result.error or "No text extracted."
 
-        policy, context_text = _build_context_text(
-            original_name=safe_original,
-            workspace_path=workspace_path,
-            ext=ext,
-            is_image=is_image,
-            extracted_text=text,
-            parse_error=error,
-        )
-
         logger.info(
             "Uploaded file processed",
             extra={
@@ -270,8 +222,7 @@ class UploadService:
             text_extracted=text_extracted,
             text_length=text_length,
             text_preview=text_preview,
-            context_policy=policy,
-            context_text=context_text,
+            context_policy="weak",
             resource_uri=resource_uri,
             metadata=metadata,
             error=error,

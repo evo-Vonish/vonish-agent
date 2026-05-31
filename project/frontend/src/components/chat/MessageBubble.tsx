@@ -29,6 +29,7 @@ function SegmentRenderer({ segment }: { segment: MessageSegment }) {
   if (segment.type === 'thinking') {
     return (
       <ThinkingCard
+        id={segment.id}
         content={segment.content}
         summary={segment.summary}
         status={segment.status}

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import {
   AlertTriangle,
   Brain,
@@ -18,6 +18,8 @@ import {
 import { cn } from '@/lib/utils';
 import type { ExecutionSegment, ExecutionStep } from '@/types';
 import { SmoothStreamingText } from './SmoothStreamingText';
+import { ExecutionCollapse } from './ExecutionCollapse';
+import { useExecutionDisclosure } from './useExecutionDisclosure';
 
 interface ExecutionSegmentCardProps {
   segment: ExecutionSegment;
@@ -51,7 +53,7 @@ function stepKind(step: ExecutionStep): StepKind {
 
 function StepIcon({ step }: { step: ExecutionStep }) {
   const cls = 'h-4 w-4';
-  if (step.status === 'running') return <Loader2 className={cn(cls, 'animate-spin')} />;
+  if (step.status === 'running' || step.status === 'retrying') return <Loader2 className={cn(cls, 'animate-spin')} />;
   if (step.status === 'failed') return <AlertTriangle className={cls} />;
   switch (stepKind(step)) {
     case 'thinking':
@@ -114,15 +116,17 @@ function primarySubject(step: ExecutionStep) {
 
 function stepHeading(step: ExecutionStep) {
   const labels = stepLabels[stepKind(step)];
-  if (step.status === 'running') return labels.running;
+  if (step.status === 'running' || step.status === 'retrying') return labels.running;
   if (step.status === 'failed') return labels.failed;
   return labels.done;
 }
 
 function statusText(step: ExecutionStep) {
   if (step.status === 'running') return '执行中';
+  if (step.status === 'retrying') return '重试中';
   if (step.status === 'failed') return '失败';
   if (step.status === 'cancelled') return '已取消';
+  if (step.status === 'skipped') return '已跳过';
   const duration = formatDuration(step.durationMs);
   return duration ? `成功 ${duration}` : '成功';
 }
@@ -156,17 +160,17 @@ function TimelineShell({
       {!last && (
         <span
           className={cn(
-            'absolute left-[9px] top-7 bottom-[-18px] w-px bg-white/14',
-            tone === 'error' && 'bg-error/30',
-            tone === 'running' && 'bg-primary/35',
+            'workflow-rail-line',
+            tone === 'error' && 'workflow-rail-line-error',
+            tone === 'running' && 'workflow-rail-line-running',
           )}
         />
       )}
       <span
         className={cn(
-          'absolute left-0 top-0 z-10 flex h-5 w-5 items-center justify-center rounded-full border border-white/12 bg-background text-foreground-muted shadow-[0_0_0_4px_hsl(var(--background))]',
-          tone === 'error' && 'border-error/35 bg-error/10 text-error',
-          tone === 'running' && 'border-primary/35 bg-primary/10 text-primary',
+          'workflow-rail-icon',
+          tone === 'error' && 'workflow-rail-icon-error',
+          tone === 'running' && 'workflow-rail-icon-running',
         )}
       >
         {icon}
@@ -224,7 +228,7 @@ function StepDetails({ step }: { step: ExecutionStep }) {
           step.status === 'failed' ? 'text-error' : 'text-foreground-muted',
         )}
       >
-        {step.status === 'running' ? (
+        {step.status === 'running' || step.status === 'retrying' ? (
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
         ) : step.status === 'failed' ? (
           <AlertTriangle className="h-3.5 w-3.5" />
@@ -239,9 +243,18 @@ function StepDetails({ step }: { step: ExecutionStep }) {
 
 function StepBlock({ step, last = false }: { step: ExecutionStep; last?: boolean }) {
   const hasDetails = Boolean(step.content || step.inputPreview || step.outputPreview || step.error || step.metadata || step.subtitle);
-  const [open, setOpen] = useState(step.status === 'running' || step.defaultCollapsed === false);
+  const disclosure = useExecutionDisclosure({
+    id: step.id,
+    status: step.status,
+    defaultCollapsed: step.defaultCollapsed,
+    defaultExpanded: step.defaultCollapsed === false,
+    failedStatuses: ['failed'],
+    interruptedStatuses: ['cancelled'],
+    terminalStatuses: ['completed', 'failed', 'cancelled', 'skipped'],
+  });
+  const open = disclosure.expanded;
   const subject = primarySubject(step);
-  const tone = step.status === 'failed' ? 'error' : step.status === 'running' ? 'running' : 'neutral';
+  const tone = step.status === 'failed' ? 'error' : step.status === 'running' || step.status === 'retrying' ? 'running' : 'neutral';
 
   return (
     <TimelineShell icon={<StepIcon step={step} />} last={last} tone={tone}>
@@ -252,10 +265,15 @@ function StepBlock({ step, last = false }: { step: ExecutionStep; last?: boolean
             'group flex max-w-full items-center gap-2 text-left text-[15px] font-medium transition-colors duration-200',
             step.status === 'failed' ? 'text-error' : 'text-foreground-muted hover:text-foreground',
           )}
-          onClick={() => hasDetails && setOpen((value) => !value)}
+          onClick={() => hasDetails && disclosure.toggle()}
         >
-          <span className="min-w-0 truncate">
-            <SmoothStreamingText text={stepHeading(step)} active={step.status === 'running'} />
+          <span
+            className="execution-title min-w-0 truncate"
+            data-motion={disclosure.titleMotion}
+            data-tone={disclosure.tone}
+            data-kind={stepKind(step)}
+          >
+            <SmoothStreamingText text={stepHeading(step)} active={step.status === 'running' || step.status === 'retrying'} />
             {subject ? <span className="ml-1 text-foreground-subtle">{subject}</span> : null}
           </span>
           {hasDetails && (
@@ -264,7 +282,11 @@ function StepBlock({ step, last = false }: { step: ExecutionStep; last?: boolean
             </span>
           )}
         </button>
-        {open && hasDetails && <StepDetails step={step} />}
+        {hasDetails && (
+          <ExecutionCollapse open={open}>
+            <StepDetails step={step} />
+          </ExecutionCollapse>
+        )}
       </div>
     </TimelineShell>
   );
@@ -288,7 +310,16 @@ function SegmentSummary({ segment }: { segment: ExecutionSegment }) {
 }
 
 export function ExecutionSegmentCard({ segment }: ExecutionSegmentCardProps) {
-  const [open, setOpen] = useState(segment.status === 'running' || segment.defaultCollapsed === false);
+  const disclosure = useExecutionDisclosure({
+    id: segment.id,
+    status: segment.status,
+    defaultCollapsed: segment.defaultCollapsed,
+    defaultExpanded: segment.defaultCollapsed === false,
+    failedStatuses: ['failed'],
+    interruptedStatuses: ['cancelled'],
+    terminalStatuses: ['completed', 'failed', 'cancelled'],
+  });
+  const open = disclosure.expanded;
   const duration = formatDuration(segment.durationMs);
   const stats = useMemo(
     () =>
@@ -317,9 +348,14 @@ export function ExecutionSegmentCard({ segment }: ExecutionSegmentCardProps) {
         <button
           type="button"
           className="group flex max-w-full items-center gap-2 text-left text-[15px] font-semibold text-foreground-muted transition-colors duration-200 hover:text-foreground"
-          onClick={() => setOpen((value) => !value)}
+          onClick={() => disclosure.toggle()}
         >
-          <span className="min-w-0 truncate">
+          <span
+            className="execution-title min-w-0 truncate"
+            data-motion={disclosure.titleMotion}
+            data-tone={disclosure.tone}
+            data-kind="segment"
+          >
             <SegmentSummary segment={segment} />
             {stats.length ? <span className="ml-2 font-normal text-foreground-subtle">{stats.join(' · ')}</span> : null}
           </span>
@@ -329,7 +365,7 @@ export function ExecutionSegmentCard({ segment }: ExecutionSegmentCardProps) {
         </button>
       </TimelineShell>
 
-      {open && (
+      <ExecutionCollapse open={open}>
         <div className="space-y-4">
           {segment.goal && (
             <TimelineShell icon={<span className="h-1.5 w-1.5 rounded-full bg-current" />} last={segment.steps.length === 0 && !segment.errors?.length}>
@@ -359,7 +395,7 @@ export function ExecutionSegmentCard({ segment }: ExecutionSegmentCardProps) {
               <button
                 type="button"
                 className="flex items-center gap-2 rounded-md px-1 py-0.5 text-[15px] text-foreground-subtle transition-colors duration-200 hover:bg-white/5 hover:text-foreground"
-                onClick={() => setOpen(false)}
+                onClick={() => disclosure.setExpanded(false)}
               >
                 <ChevronDown className="h-4 w-4" />
                 收起本次处理
@@ -367,7 +403,7 @@ export function ExecutionSegmentCard({ segment }: ExecutionSegmentCardProps) {
             </div>
           )}
         </div>
-      )}
+      </ExecutionCollapse>
     </div>
   );
 }

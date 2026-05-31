@@ -289,6 +289,7 @@ export async function listWorkspaceFiles(
 ): Promise<WorkspaceFileItem[]> {
   const params = new URLSearchParams();
   if (subdir) params.set('path', subdir);
+  params.set('recursive', 'true');
   const qs = params.toString();
   const url = `/api/workspaces/${conversationId}/files${qs ? `?${qs}` : ''}`;
   const response = await fetch(url);
@@ -611,7 +612,12 @@ export interface BackendTool {
   name: string;
   description: string;
   category: string;
+  enabled?: boolean;
+  risk?: string;
+  risk_level?: string;
+  requires_approval?: boolean;
   requires_confirmation: boolean;
+  workspace_bound?: boolean;
   schema: Record<string, unknown>;
 }
 

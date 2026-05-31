@@ -184,6 +184,167 @@
     animation: codex-subtle-pop 180ms cubic-bezier(0.22, 1, 0.36, 1);
   }
 
+  .workflow-rail-line {
+    position: absolute;
+    left: 9px;
+    top: 1.75rem;
+    bottom: -1.125rem;
+    width: 1px;
+    border-radius: 9999px;
+    background: rgba(255, 255, 255, 0.16);
+  }
+
+  .workflow-rail-line-short {
+    bottom: 0;
+  }
+
+  .workflow-rail-line-running {
+    background: rgba(79, 70, 229, 0.46);
+    box-shadow: 0 0 12px rgba(79, 70, 229, 0.22);
+  }
+
+  .workflow-rail-line-error {
+    background: rgba(239, 68, 68, 0.46);
+    box-shadow: 0 0 12px rgba(239, 68, 68, 0.18);
+  }
+
+  .workflow-rail-line-thinking {
+    background: rgba(139, 92, 246, 0.46);
+    box-shadow: 0 0 12px rgba(139, 92, 246, 0.18);
+  }
+
+  .workflow-rail-icon {
+    position: absolute;
+    left: 0;
+    top: 0;
+    z-index: 10;
+    display: flex;
+    width: 1.25rem;
+    height: 1.25rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: #0d0d0d;
+    color: #888888;
+    box-shadow: 0 0 0 4px #0d0d0d;
+  }
+
+  .workflow-rail-icon-running {
+    border-color: rgba(79, 70, 229, 0.42);
+    background: rgba(79, 70, 229, 0.1);
+    color: #818cf8;
+  }
+
+  .workflow-rail-icon-thinking {
+    border-color: rgba(139, 92, 246, 0.42);
+    background: rgba(139, 92, 246, 0.1);
+    color: #c4b5fd;
+  }
+
+  .workflow-rail-icon-error {
+    border-color: rgba(239, 68, 68, 0.42);
+    background: rgba(239, 68, 68, 0.1);
+    color: #f87171;
+  }
+
+  .execution-title {
+    position: relative;
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    vertical-align: bottom;
+  }
+
+  .execution-title[data-motion='running'] {
+    animation: title-breathing 2.8s ease-in-out infinite;
+  }
+
+  .execution-title[data-motion='running'][data-kind='thinking'] {
+    color: #c4b5fd;
+  }
+
+  .execution-title[data-motion='running'][data-kind='command'] {
+    color: #86efac;
+  }
+
+  .execution-title[data-motion='running'][data-kind='file'] {
+    color: #93c5fd;
+  }
+
+  .execution-title[data-motion='running'][data-kind='web'] {
+    color: #a5b4fc;
+  }
+
+  .execution-title[data-motion='running'][data-kind='tool'],
+  .execution-title[data-motion='running'][data-kind='segment'] {
+    color: #d8b4fe;
+  }
+
+  .execution-title[data-motion='completed-flash']::after {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 -35%;
+    width: 35%;
+    background: linear-gradient(
+      100deg,
+      transparent,
+      rgba(255, 255, 255, 0.68),
+      transparent
+    );
+    pointer-events: none;
+    animation: title-sweep 720ms ease-out forwards;
+  }
+
+  .execution-title[data-motion='completed-flash'][data-tone='failed']::after {
+    background: linear-gradient(
+      100deg,
+      transparent,
+      rgba(248, 113, 113, 0.7),
+      transparent
+    );
+  }
+
+  .execution-title[data-motion='completed-flash'][data-tone='interrupted']::after {
+    background: linear-gradient(
+      100deg,
+      transparent,
+      rgba(245, 158, 11, 0.72),
+      transparent
+    );
+  }
+
+  .execution-collapse {
+    display: grid;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    transform: translateY(-4px);
+    filter: blur(2px);
+    pointer-events: none;
+    transition:
+      grid-template-rows 260ms ease,
+      opacity 220ms ease,
+      transform 220ms ease,
+      filter 220ms ease;
+  }
+
+  .execution-collapse[data-open='false'] {
+    margin-top: 0 !important;
+  }
+
+  .execution-collapse[data-open='true'] {
+    grid-template-rows: 1fr;
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+    pointer-events: auto;
+  }
+
+  .execution-collapse-inner {
+    min-height: 0;
+    overflow: hidden;
+  }
+
   @keyframes smooth-text-in {
     from {
       opacity: 0.72;
@@ -218,6 +379,46 @@
     to {
       opacity: 1;
       transform: scale(1);
+    }
+  }
+
+  @keyframes title-breathing {
+    0% {
+      opacity: 0.58;
+      filter: brightness(0.88);
+    }
+    50% {
+      opacity: 1;
+      filter: brightness(1.38);
+    }
+    100% {
+      opacity: 0.58;
+      filter: brightness(0.88);
+    }
+  }
+
+  @keyframes title-sweep {
+    from {
+      left: -35%;
+    }
+    to {
+      left: 120%;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .execution-title[data-motion='running'],
+    .execution-title[data-motion='completed-flash']::after,
+    .codex-panel-reveal,
+    .codex-subtle-pop,
+    .smooth-streaming-text {
+      animation: none;
+    }
+
+    .execution-collapse {
+      transition: none;
+      filter: none;
+      transform: none;
     }
   }
 }
