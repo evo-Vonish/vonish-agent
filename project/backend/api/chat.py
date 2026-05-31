@@ -440,23 +440,27 @@ async def chat_stream(
                 step["defaultCollapsed"] = bool(data.get("defaultCollapsed", True))
                 return
 
-    def _append_workflow_error(data: dict[str, Any]) -> None:
-        segment = _current_execution(data)
-        if not segment:
-            return
-        error_id = str(data.get("errorId") or data.get("id") or f"err-{len(segment.get('errors', [])) + 1}")
-        error = {
+    def _workflow_error_payload(data: dict[str, Any], fallback_message: str = "处理流程异常中断。") -> dict[str, Any]:
+        error_id = str(data.get("errorId") or data.get("id") or f"err-{len(assistant_segments) + 1}")
+        return {
             "id": error_id,
-            "segmentId": str(segment.get("id") or ""),
+            "segmentId": str(data.get("segmentId") or ""),
             "stepId": data.get("stepId"),
             "severity": str(data.get("severity") or "error"),
-            "errorType": str(data.get("errorType") or "workflow_error"),
+            "errorType": str(data.get("errorType") or data.get("code") or "workflow_error"),
             "title": str(data.get("title") or "工作流异常"),
-            "message": str(data.get("message") or "处理流程异常中断。"),
+            "message": str(data.get("message") or data.get("detail") or fallback_message),
             "recoverable": bool(data.get("recoverable", True)),
             "actions": data.get("actions") if isinstance(data.get("actions"), list) else [],
             "detailsRef": data.get("detailsRef"),
         }
+
+    def _append_workflow_error(data: dict[str, Any]) -> None:
+        segment = _current_execution(data)
+        if not segment:
+            _append_workflow_error_segment(data)
+            return
+        error = _workflow_error_payload({**data, "segmentId": str(segment.get("id") or "")})
         segment.setdefault("errors", []).append(error)
         segment["status"] = "failed"
         segment["errorCount"] = max(int(segment.get("errorCount") or 0), len(segment.get("errors", [])))
@@ -471,6 +475,18 @@ async def chat_stream(
                 "error": error["message"],
                 "collapsible": True,
                 "defaultCollapsed": False,
+            }
+        )
+        _append_workflow_error_segment(data)
+
+    def _append_workflow_error_segment(data: dict[str, Any], fallback_message: str = "处理流程异常中断。") -> None:
+        error = _workflow_error_payload(data, fallback_message)
+        assistant_segments.append(
+            {
+                "id": f"workflow-error-{error['id']}",
+                "type": "workflow_error",
+                "error": error,
+                "retryPrompt": "继续任务。请基于上一次工作流中断的位置继续执行，先简要说明中断原因和恢复计划，然后继续完成任务。",
             }
         )
 
@@ -578,7 +594,24 @@ async def chat_stream(
                 elif event_name == "tool_result":
                     if active_execution_segment_id is None:
                         _finish_tool_call(event_data)
-                elif event_name in {"message_end", "aborted", "error"}:
+                elif event_name == "error":
+                    _finish_thinking()
+                    _append_workflow_error_segment(
+                        event_data,
+                        str(event_data.get("detail") or "工作流异常中断。"),
+                    )
+                elif event_name == "aborted":
+                    _finish_thinking()
+                    _append_workflow_error_segment(
+                        {
+                            **event_data,
+                            "title": "工作流已停止",
+                            "severity": "warning",
+                            "errorType": "aborted",
+                            "message": f"生成已停止：{event_data.get('reason') or 'unknown'}",
+                        }
+                    )
+                elif event_name == "message_end":
                     _finish_thinking()
                 yield event_str
         finally:
