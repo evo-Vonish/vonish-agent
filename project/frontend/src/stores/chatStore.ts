@@ -754,6 +754,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }));
     };
 
+    const appendMessageWorkflowError = (raw: unknown, fallback?: Parameters<typeof createWorkflowErrorSegment>[1]) => {
+      appendSegment(createWorkflowErrorSegment(raw, fallback));
+    };
+
     try {
       let uploadedFiles: UploadedFileMeta[] = [];
       if (hasAttachments) {
@@ -892,6 +896,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
             const segmentId = String(data.segmentId ?? activeExecutionSegmentId ?? '');
             const error = normalizeWorkflowError(data, segmentId || undefined);
             if (segmentId) appendWorkflowError(segmentId, error);
+            appendMessageWorkflowError(data, {
+              title: error.title,
+              message: error.message,
+              errorType: error.errorType,
+              severity: error.severity,
+            });
             set({ apiError: `${error.title}: ${error.message}` });
             return;
           }
@@ -1096,13 +1106,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
             const detail = String(data.detail ?? 'Unknown API error');
             console.error('Chat stream returned error event', data);
             const current = get().messages.find((m) => m.id === currentMsgId);
+            const errorSegment = createWorkflowErrorSegment(data, {
+              title: '工作流已中断',
+              message: detail,
+              errorType: String(data.code ?? 'stream_error'),
+              severity: 'error',
+            });
             get().updateMessage(currentMsgId, {
               content: detail,
               type: 'error',
               status: 'error',
               segments: [
                 ...(current?.segments ?? []),
-                { id: generateId(), type: 'text', content: detail },
+                errorSegment,
               ],
             });
             set({ apiError: detail, isStreaming: false });
@@ -1111,12 +1127,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
           if (event === 'aborted') {
             const current = get().messages.find((m) => m.id === currentMsgId);
+            const reason = String(data.reason ?? 'user_request');
             get().updateMessage(currentMsgId, {
               status: 'error',
               content: 'Generation stopped.',
               segments: [
                 ...(current?.segments ?? []),
-                { id: generateId(), type: 'text', content: 'Generation stopped.' },
+                createWorkflowErrorSegment(data, {
+                  title: '工作流已停止',
+                  message: reason === 'user_request' ? '用户主动停止了生成。' : `生成已停止：${reason}`,
+                  errorType: 'aborted',
+                  severity: 'warning',
+                }),
               ],
             });
             set({ isStreaming: false });
