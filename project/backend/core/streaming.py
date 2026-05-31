@@ -37,6 +37,8 @@ SSE_EVENT_TYPES = {
     "aborted",
     # Human Interaction events
     "interaction_required",
+    # Error events
+    "workflow_failure",
     "agent_paused",
     "agent_resumed",
     "todo_updated",

@@ -304,6 +304,7 @@ class ToolExecutor:
             "list_directory": self._handle_list_directory,
             "snapshot": self._handle_snapshot,
             "search_workspace": self._handle_search_workspace,
+            "create_directories": self._handle_create_directories,
             "git_status": self._handle_git_status,
             "git_diff": self._handle_git_diff,
             "git_history": self._handle_git_history,
@@ -448,14 +449,24 @@ class ToolExecutor:
                 "instead of Unix commands like 'ls'."
             )
 
-        return {
+        import platform as _plat
+        result = {
             "success": process.returncode == 0,
             "command": command,
             "exit_code": process.returncode,
             "stdout": stdout_str,
             "stderr": stderr_str,
             "cwd": str(work_dir),
+            "os": _plat.system(),
+            "shell": "powershell" if _plat.system() == "Windows" else "bash",
         }
+        if not result["success"]:
+            result["hint"] = (
+                "Command failed. On Windows, avoid Unix/Bash-only syntax "
+                "like brace expansion {a,b}. Use Python pathlib or "
+                "PowerShell-compatible commands instead."
+            )
+        return result
 
     async def _handle_ipython(
         self,
@@ -833,6 +844,33 @@ class ToolExecutor:
             max_results=max_results,
             context_lines=context_lines,
         )
+
+    # ── Create Directories ────────────────────────────────────────────
+
+    async def _handle_create_directories(
+        self,
+        paths: list[str],
+        conversation_id: str = "",
+        **_: Any,
+    ) -> dict[str, Any]:
+        ws = self._workspace_dir(conversation_id)
+        created: list[str] = []
+        already: list[str] = []
+        failed: list[str] = []
+        for p in paths:
+            target = (ws / p).resolve()
+            if not str(target).startswith(str(ws.resolve())):
+                failed.append(p)
+                continue
+            try:
+                if target.exists():
+                    already.append(p)
+                else:
+                    target.mkdir(parents=True, exist_ok=True)
+                    created.append(p)
+            except Exception:
+                failed.append(p)
+        return {"created": created, "alreadyExists": already, "failed": failed}
 
     # ── Git Workspace Tools ───────────────────────────────────────────
 

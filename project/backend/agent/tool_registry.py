@@ -619,6 +619,26 @@ def register_default_tools() -> None:
         )
     )
 
+    # Create Directories
+    registry.register(
+        ToolDefinition(
+            name="create_directories",
+            description="Create directories in the workspace. Cross-platform safe. Prefer this over shell mkdir, especially on Windows.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Directory paths relative to workspace root",
+                    },
+                },
+                "required": ["paths"],
+            },
+            category="workspace",
+        )
+    )
+
     # Git Status
     registry.register(
         ToolDefinition(
@@ -857,6 +877,22 @@ def register_workspace_tools(registry: ToolRegistry) -> None:
                         "description": "The active conversation ID (injected by executor)",
                     },
                 },
+            },
+            category="workspace",
+        )
+    )
+
+    # Create Directories
+    registry.register(
+        ToolDefinition(
+            name="create_directories",
+            description="Create directories in workspace. Cross-platform safe. Prefer over shell mkdir.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "paths": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["paths"],
             },
             category="workspace",
         )
