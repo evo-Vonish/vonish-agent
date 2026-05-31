@@ -141,7 +141,7 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
           </div>
         )}
 
-        {isAssistant && hasSegments && (
+        {!isUser && hasSegments && (
           <div className="space-y-4 w-full">
             {message.segments?.map((segment) => (
               <SegmentRenderer key={segment.id} segment={segment} />

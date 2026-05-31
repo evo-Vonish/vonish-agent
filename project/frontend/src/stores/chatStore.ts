@@ -558,6 +558,19 @@ function normalizeAssistantSegments(
   ];
 }
 
+function projectErrorMessage(raw: unknown, fallback: Parameters<typeof createWorkflowErrorSegment>[1]): Message {
+  const segment = createWorkflowErrorSegment(raw, fallback);
+  return {
+    id: generateId(),
+    role: 'system',
+    content: segment.error.message,
+    type: 'error',
+    segments: [segment],
+    timestamp: Date.now(),
+    status: 'error',
+  };
+}
+
 export const useChatStore = create<ChatState>((set, get) => ({
   conversations: [],
   currentConversationId: null,
@@ -609,10 +622,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // Load tools from backend
       void useToolStore.getState().loadToolsFromBackend();
     } catch (error) {
-      set({
+      const detail = error instanceof Error ? error.message : String(error);
+      set((state) => ({
         initialized: true,
-        apiError: error instanceof Error ? error.message : String(error),
-      });
+        apiError: detail,
+        messages: [
+          ...state.messages,
+          projectErrorMessage(error, {
+            title: '项目初始化失败',
+            message: detail,
+            errorType: 'initialize_error',
+            severity: 'error',
+          }),
+        ],
+      }));
     }
   },
 
@@ -1208,7 +1231,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
           status: 'error',
           segments: [
             ...(current?.segments ?? []),
-            { id: generateId(), type: 'text', content: detail },
+            createWorkflowErrorSegment(error, {
+              title: '工作流异常中断',
+              message: detail,
+              errorType: 'client_stream_error',
+              severity: 'error',
+            }),
           ],
         });
         set({ apiError: detail });
@@ -1253,6 +1281,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       console.error('Interaction response failed', error);
+      get().addMessage(
+        projectErrorMessage(error, {
+          title: '交互响应提交失败',
+          message: detail,
+          errorType: 'interaction_response_error',
+          severity: 'error',
+        }),
+      );
       set({ apiError: detail });
       throw error;
     }
@@ -1295,8 +1331,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
         };
       });
       set({ messages });
-    } catch {
-      set({ messages: [] });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      set({
+        messages: [
+          projectErrorMessage(error, {
+            title: '加载对话失败',
+            message: detail,
+            errorType: 'conversation_load_error',
+            severity: 'error',
+          }),
+        ],
+        apiError: detail,
+      });
     }
 
     // Load workspace file tree for this conversation
