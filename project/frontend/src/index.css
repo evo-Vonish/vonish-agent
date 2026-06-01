@@ -184,11 +184,35 @@
     animation: codex-subtle-pop 180ms cubic-bezier(0.22, 1, 0.36, 1);
   }
 
+  .message-stream-shell {
+    max-width: min(1160px, calc(100vw - 96px));
+  }
+
+  .message-stream-shell,
+  .message-stream-shell * {
+    min-width: 0;
+  }
+
+  .message-stream-shell p,
+  .message-stream-shell li,
+  .message-stream-shell pre,
+  .message-stream-shell code,
+  .message-stream-shell span,
+  .message-stream-shell button {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .codex-detail-panel {
+    width: min(900px, 100%);
+    max-width: 100%;
+  }
+
   .workflow-rail-line {
     position: absolute;
     left: 9px;
     top: 1.75rem;
-    bottom: -1.125rem;
+    bottom: -0.875rem;
     width: 1px;
     border-radius: 9999px;
     background: rgba(255, 255, 255, 0.16);
@@ -343,6 +367,27 @@
   .execution-collapse-inner {
     min-height: 0;
     overflow: hidden;
+  }
+
+  .workspace-action-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.375rem;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.03);
+    padding: 0.375rem;
+    color: #888888;
+    transition:
+      background-color 160ms ease,
+      border-color 160ms ease,
+      color 160ms ease;
+  }
+
+  .workspace-action-btn:hover {
+    border-color: rgba(79, 70, 229, 0.34);
+    background: rgba(79, 70, 229, 0.12);
+    color: #c4b5fd;
   }
 
   @keyframes smooth-text-in {

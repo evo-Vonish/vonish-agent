@@ -55,7 +55,7 @@ export function MessageStream({ className }: MessageStreamProps) {
           className
         )}
       >
-        <div className="max-w-5xl mx-auto w-full space-y-1">
+        <div className="message-stream-shell mx-auto w-full space-y-0.5">
           {messages.map((msg: Message) => (
             <MessageBubble key={msg.id} message={msg} />
           ))}

@@ -25,6 +25,7 @@ export function ThinkingCard({ id, content, className, defaultExpanded = false, 
     terminalStatuses: ['complete'],
   });
   const expanded = disclosure.expanded;
+  const hasContent = content.trim().length > 0;
 
   // Summary = first line or first 60 chars
   const fallbackSummary = content.split('\n')[0].slice(0, 60) + (content.length > 60 ? '...' : '');
@@ -55,7 +56,7 @@ export function ThinkingCard({ id, content, className, defaultExpanded = false, 
         {icon}
       </span>
       <button
-        onClick={() => disclosure.toggle()}
+        onClick={() => hasContent && disclosure.toggle()}
         className="flex max-w-full items-center gap-2 text-left text-[15px] font-medium text-foreground-muted transition-colors hover:text-foreground"
       >
         <span
@@ -66,14 +67,14 @@ export function ThinkingCard({ id, content, className, defaultExpanded = false, 
         >
           {label}
         </span>
-        {expanded ? (
+        {hasContent && (expanded ? (
           <ChevronDown className="w-3.5 h-3.5 flex-shrink-0" />
         ) : (
           <ChevronRight className="w-3.5 h-3.5 flex-shrink-0" />
-        )}
+        ))}
       </button>
-      <ExecutionCollapse open={expanded}>
-        <div className="codex-panel-reveal rounded-[10px] bg-[#252525] px-3 py-3 text-sm leading-7 text-foreground-muted">
+      <ExecutionCollapse open={expanded && hasContent}>
+        <div className="codex-panel-reveal codex-detail-panel rounded-[10px] bg-[#252525] px-3 py-2.5 text-sm leading-7 text-foreground-muted">
           <SmoothStreamingText text={content || '思考中...'} active={status === 'streaming'} chunkSize={5} />
         </div>
       </ExecutionCollapse>

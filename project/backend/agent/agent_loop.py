@@ -189,6 +189,8 @@ class AgentLoop:
                 return "web_search"
             if tool_name == "web_fetch":
                 return "web_fetch"
+            if tool_name in {"research_search", "research_fetch", "deep_research"}:
+                return "research"
             if tool_name in {"ask_user_question", "request_approval"}:
                 return "user_interaction"
             if tool_name in {"git_status", "git_diff", "git_history"}:
@@ -208,6 +210,14 @@ class AgentLoop:
                 return "正在搜索资料", str(args.get("query") or args.get("queries") or "")
             if tool_name == "web_fetch":
                 return "正在抓取网页", str(args.get("url") or "")
+            if tool_name == "research_search":
+                return "Research Search", str(args.get("query") or "")
+            if tool_name == "research_fetch":
+                return "Research Fetch", str(args.get("url") or "")
+            if tool_name == "deep_research":
+                return "Deep Research", str(args.get("query") or "")
+            if tool_name == "research_status":
+                return "Research Status", "检查 Research Core"
             if tool_name == "ipython":
                 return "正在运行 Python 代码", ""
             if tool_name == "git_status":
@@ -233,7 +243,7 @@ class AgentLoop:
                 segment_stats["fileWriteCount"] += 1
             elif step_type == "file_edit":
                 segment_stats["fileEditCount"] += 1
-            elif step_type in {"web_search", "web_fetch"}:
+            elif step_type in {"web_search", "web_fetch", "research"}:
                 segment_stats["webRequestCount"] += 1
 
         # Create model adapter
@@ -563,6 +573,7 @@ class AgentLoop:
                                 "metadata": {
                                     "toolName": result.tool_name,
                                     "toolCallId": result.call_id,
+                                    **({"result": result.result} if result.tool_name in {"git_status", "git_diff", "git_history"} else {}),
                                 },
                                 "error": result.error_message if not result.success else None,
                             },
@@ -646,7 +657,7 @@ class AgentLoop:
 
                     # 5. Feed results back as native tool-response messages
                     context = await self._update_context_with_native_results(
-                        context, native_tool_calls, tool_results
+                        context, native_tool_calls, tool_results, thinking_buffer
                     )
                     # Continue to next round — model will synthesize answer OR pause for user
                     continue
@@ -696,6 +707,28 @@ class AgentLoop:
             return result.error_message or f"{result.tool_name} failed"
         payload = result.result
         if isinstance(payload, dict):
+            if result.tool_name == "research_search":
+                return f"{len(payload.get('results', []) or [])} results · {payload.get('timing_ms', 0)}ms"
+            if result.tool_name == "research_fetch":
+                status = payload.get("status") or ("success" if payload.get("success") else "failed")
+                return f"{status} · {payload.get('title') or payload.get('url') or ''} · {payload.get('char_count', 0)} chars"
+            if result.tool_name == "deep_research":
+                return str(payload.get("summary") or f"{len(payload.get('sources', []) or [])} sources · evidence ready")
+            if result.tool_name == "research_status":
+                status = payload.get("status", {}).get("status") if isinstance(payload.get("status"), dict) else payload.get("status")
+                return f"Research Core {status or 'unknown'}"
+            if result.tool_name == "git_status":
+                if not payload.get("is_git_repo"):
+                    return str(payload.get("message") or "当前 Workspace 不是 Git 仓库")
+                changed = sum(len(payload.get(key, []) or []) for key in ("staged", "modified", "untracked", "deleted", "conflicts"))
+                branch = payload.get("branch") or "HEAD"
+                return f"{branch} · {changed} modified" if changed else f"{branch} · Clean"
+            if result.tool_name == "git_diff":
+                return f"{payload.get('total_files', len(payload.get('files', []) or []))} files changed · +{payload.get('additions', 0)} -{payload.get('deletions', 0)}"
+            if result.tool_name == "git_history":
+                if payload.get("mode") == "blame":
+                    return f"Blame · {len(payload.get('lines', []) or [])} lines"
+                return f"最近 {len(payload.get('commits', []) or [])} 次提交"
             if payload.get("output"):
                 return str(payload.get("output"))[:500]
             if payload.get("path"):
@@ -911,6 +944,7 @@ class AgentLoop:
         context: "AgentContext",
         native_tool_calls: list[dict],
         tool_results: list[ToolCallResult],
+        thinking_content: str = "",
     ) -> "AgentContext":
         """Update context using native tool-call messages.
 
@@ -923,6 +957,7 @@ class AgentLoop:
             MessageBlock(
                 role="assistant",
                 content=None,
+                thinking_content=thinking_content or "Tool calls prepared.",
                 tool_calls=[
                     {
                         "id": tc["id"],

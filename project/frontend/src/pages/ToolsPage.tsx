@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, Wrench, Search } from 'lucide-react';
+import { Plus, Wrench, Search, SlidersHorizontal } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToolStore } from '@/stores/useToolStore';
 import { useI18n } from '@/i18n';
@@ -7,16 +7,19 @@ import { ToolCategorySection } from '@/components/tools/ToolCategorySection';
 import { AddToolModal } from '@/components/tools/AddToolModal';
 import type { ToolCategoryType } from '@/types/tools';
 
-const CATEGORY_ORDER: ToolCategoryType[] = ['file_ops', 'workspace', 'python_ops', 'web_ops', 'shell_ops', 'system'];
+const CATEGORY_ORDER: ToolCategoryType[] = ['file_ops', 'workspace', 'python_ops', 'research', 'web_ops', 'shell_ops', 'system'];
 
 export default function ToolsPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [filterMode, setFilterMode] = useState<'all' | 'enabled' | 'failed' | 'high_risk'>('all');
   const { t } = useI18n();
 
   const tools = useToolStore((s) => s.tools);
   const enabledCount = tools.filter((t) => t.isEnabled).length;
   const totalCount = tools.length;
+  const failedCount = tools.filter((t) => t.lastStatus === 'failed').length;
+  const highRiskCount = tools.filter((t) => t.riskLevel === 'high' || t.approvalLevel === 'required').length;
 
   // Filter categories based on search
   const visibleCategories = searchQuery.trim()
@@ -25,7 +28,11 @@ export default function ToolsPage() {
           (t) =>
             t.category === cat &&
             (t.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-              t.description.toLowerCase().includes(searchQuery.toLowerCase()))
+              t.description.toLowerCase().includes(searchQuery.toLowerCase())) &&
+            (filterMode === 'all' ||
+              (filterMode === 'enabled' && t.isEnabled) ||
+              (filterMode === 'failed' && t.lastStatus === 'failed') ||
+              (filterMode === 'high_risk' && (t.riskLevel === 'high' || t.approvalLevel === 'required')))
         );
         return catTools.length > 0;
       })
@@ -95,6 +102,28 @@ export default function ToolsPage() {
               {tools.filter((t) => t.approvalLevel === 'required').length} Required
             </span>
           </div>
+          <div className="ml-auto hidden items-center gap-1 rounded-lg border border-border bg-background/60 p-1 sm:flex">
+            <SlidersHorizontal className="mx-1 h-3.5 w-3.5 text-foreground-subtle" />
+            {[
+              ['all', `All ${totalCount}`],
+              ['enabled', `Enabled ${enabledCount}`],
+              ['failed', `Failed ${failedCount}`],
+              ['high_risk', `High Risk ${highRiskCount}`],
+            ].map(([value, label]) => (
+              <button
+                key={value}
+                onClick={() => setFilterMode(value as typeof filterMode)}
+                className={cn(
+                  'rounded-md px-2 py-1 text-[11px] transition-colors',
+                  filterMode === value
+                    ? 'bg-primary/15 text-primary'
+                    : 'text-foreground-subtle hover:bg-white/[0.05] hover:text-foreground',
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Mobile search */}
@@ -121,7 +150,7 @@ export default function ToolsPage() {
           </div>
         ) : (
           visibleCategories.map((category) => (
-            <ToolCategorySection key={category} category={category} />
+            <ToolCategorySection key={category} category={category} searchQuery={searchQuery} filterMode={filterMode} />
           ))
         )}
       </div>

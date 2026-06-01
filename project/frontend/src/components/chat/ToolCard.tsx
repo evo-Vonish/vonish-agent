@@ -56,7 +56,7 @@ export function ToolCard({ tool, className }: ToolCardProps) {
     );
 
   return (
-    <div className={cn('relative space-y-2 pl-9', config.color, className)}>
+    <div className={cn('relative space-y-1.5 pl-9', config.color, className)}>
       {expanded && (
         <span
           className={cn(
@@ -78,7 +78,7 @@ export function ToolCard({ tool, className }: ToolCardProps) {
       <button
         onClick={() => disclosure.toggle()}
         className={cn(
-          'flex max-w-full items-center gap-2 text-left text-[15px] font-medium transition-colors hover:text-foreground',
+          'flex max-w-full items-center gap-2 text-left text-[14px] font-medium transition-colors hover:text-foreground',
           tool.status === 'error' && 'hover:text-error'
         )}
       >
@@ -103,11 +103,11 @@ export function ToolCard({ tool, className }: ToolCardProps) {
         )}
       </button>
       <ExecutionCollapse open={expanded}>
-        <div className="codex-panel-reveal relative overflow-hidden rounded-[10px] bg-[#252525] text-[13px] shadow-sm">
-          <div className="border-b border-white/5 px-3 py-2 text-sm text-foreground-muted">
+        <div className="codex-panel-reveal codex-detail-panel relative overflow-hidden rounded-[10px] bg-[#252525] text-[13px] shadow-sm">
+          <div className="border-b border-white/5 px-3 py-1.5 text-sm text-foreground-muted">
             {tool.name === 'shell_command' ? 'Shell' : 'Tool'}
           </div>
-          <div className="max-h-[360px] space-y-3 overflow-auto px-3 py-3 font-mono text-sm leading-6">
+          <div className="max-h-[320px] space-y-2.5 overflow-auto px-3 py-2.5 font-mono text-sm leading-6">
             <div>
               <span className="text-foreground-subtle">参数</span>
               <pre className="mt-1 whitespace-pre-wrap break-words text-foreground-muted">

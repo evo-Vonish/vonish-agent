@@ -57,6 +57,7 @@ class ContextState:
         self.user_memory_text: str = ""
         self.cycle_briefing_text: str = ""
         self.workspace_refs_text: str = ""
+        self.workspace_status_text: str = ""
         self.tool_defs_text: str = ""
         self.current_query: str = ""
         self.warnings: list[str] = []
@@ -66,6 +67,7 @@ class ContextState:
             "message_count": len(self.messages),
             "tool_result_count": len(self.tool_results),
             "workspace_file_count": len(self.workspace_files),
+            "workspace_status": self.workspace_status_text,
         }
 
 
@@ -245,6 +247,11 @@ class ContextBuilder:
         ws_tokens = self._estimate_tokens(ws_refs_text)
         budget.add_usage(ws_tokens)
 
+        workspace_status_text = await self._build_workspace_status(conversation_id)
+        ctx.workspace_status_text = workspace_status_text
+        workspace_status_tokens = self._estimate_tokens(workspace_status_text)
+        budget.add_usage(workspace_status_tokens)
+
         # 4e: Tool Definitions (alphabetically sorted for cache stability)
         tool_defs = self._fetch_tool_definitions()
         tool_defs.sort(key=lambda t: t.get("name", ""))  # Stable alphabetical order
@@ -278,6 +285,7 @@ class ContextBuilder:
             "user_memory": mem_tokens,
             "cycle_briefing": brief_tokens,
             "workspace_refs": ws_tokens,
+            "workspace_status": workspace_status_tokens,
             "tool_definitions": tool_tokens,
             "recent_messages": msg_tokens,
             "current_query": query_tokens,
@@ -326,6 +334,7 @@ class ContextBuilder:
             user_memory=user_memory_text,
             cycle_briefing=briefing_text,
             workspace_refs=ws_refs_text,
+            workspace_status=workspace_status_text,
         )
         sys_hash = self._compute_hash(full_system)
 
@@ -544,6 +553,51 @@ class ContextBuilder:
             logger.warning(f"Workspace refs build failed: {e}")
             return ""
 
+    async def _build_workspace_status(self, conversation_id: str) -> str:
+        """Build a compact current workspace status block for the system prompt."""
+        try:
+            from pathlib import Path
+
+            from services.git_service import git_status, workspace_root
+
+            root = workspace_root(conversation_id)
+            status = await git_status(conversation_id)
+            file_count = 0
+            if root.exists():
+                for path in root.rglob("*"):
+                    if not path.is_file():
+                        continue
+                    try:
+                        rel_parts = path.relative_to(root).parts
+                    except ValueError:
+                        continue
+                    if ".git" in rel_parts or ".workspace" in rel_parts:
+                        continue
+                    file_count += 1
+
+            dirty_count = sum(
+                len(status.get(key, []) or [])
+                for key in ("staged", "modified", "untracked", "deleted", "conflicts")
+            )
+            git_line = "not a git repository"
+            if status.get("is_git_repo"):
+                branch = status.get("branch") or "HEAD"
+                git_line = f"{branch}, {dirty_count} changed" if dirty_count else f"{branch}, clean"
+
+            return "\n".join(
+                [
+                    "## Current Workspace",
+                    f"- Name: {Path(root).name}",
+                    f"- Root: {root}",
+                    f"- Git: {git_line}",
+                    f"- Files: {file_count}",
+                    "- File tree is intentionally not included; use workspace tools when file inspection is needed.",
+                ]
+            )
+        except Exception as e:
+            logger.debug(f"Workspace status build failed: {e}")
+            return ""
+
     def _fetch_tool_definitions(self) -> list[dict[str, Any]]:
         """Fetch active tool definitions.
 
@@ -675,6 +729,7 @@ class ContextBuilder:
         user_memory: str,
         cycle_briefing: str,
         workspace_refs: str,
+        workspace_status: str = "",
     ) -> str:
         """Assemble the complete system prompt from all blocks.
 
@@ -697,6 +752,9 @@ class ContextBuilder:
 
         if workspace_refs:
             parts.extend(["", workspace_refs])
+
+        if workspace_status:
+            parts.extend(["", workspace_status])
 
         return "\n".join(parts)
 

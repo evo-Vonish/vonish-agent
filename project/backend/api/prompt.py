@@ -30,8 +30,12 @@ _tool_configs: dict[str, bool] = {
     "shell_command": True,
     "ipython": True,
     # Web
-    "web_fetch": True,
-    "web_search": True,
+    "web_fetch": False,
+    "web_search": False,
+    "research_search": True,
+    "research_fetch": True,
+    "deep_research": True,
+    "research_status": True,
     # Human Interaction
     "set_todo_list": True,
     "ask_user_question": True,
@@ -53,18 +57,20 @@ def _sync_tool_configs_from_registry() -> None:
 
 def get_enabled_tools() -> list[str]:
     """Return list of currently enabled tool names."""
+    _sync_tool_configs_from_registry()
     return [name for name, enabled in _tool_configs.items() if enabled]
 
 
 def set_tool_enabled(tool_name: str, enabled: bool) -> None:
     """Enable or disable a tool by name."""
-    if tool_name in _tool_configs:
-        _tool_configs[tool_name] = enabled
-        logger.info(f"Tool {tool_name} -> {'enabled' if enabled else 'disabled'}")
+    _sync_tool_configs_from_registry()
+    _tool_configs[tool_name] = enabled
+    logger.info(f"Tool {tool_name} -> {'enabled' if enabled else 'disabled'}")
 
 
 def get_all_tool_configs() -> dict[str, bool]:
     """Return all tool configs."""
+    _sync_tool_configs_from_registry()
     return dict(_tool_configs)
 
 

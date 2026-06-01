@@ -25,13 +25,14 @@ interface ExecutionSegmentCardProps {
   segment: ExecutionSegment;
 }
 
-type StepKind = 'thinking' | 'command' | 'file' | 'web' | 'tool' | 'error';
+type StepKind = 'thinking' | 'command' | 'file' | 'web' | 'research' | 'tool' | 'error';
 
 const stepLabels: Record<StepKind, { done: string; running: string; failed: string; panel: string }> = {
   thinking: { done: '已完成思考', running: '正在思考', failed: '思考中断', panel: 'Thinking' },
   command: { done: '已运行命令', running: '正在运行命令', failed: '命令失败', panel: 'Shell' },
   file: { done: '已编辑文件', running: '正在编辑文件', failed: '文件操作失败', panel: 'File' },
   web: { done: '已检索网页', running: '正在检索网页', failed: '网页检索失败', panel: 'Web' },
+  research: { done: '已完成研究', running: '正在研究', failed: '研究失败', panel: 'Research' },
   tool: { done: '已调用工具', running: '正在调用工具', failed: '工具调用失败', panel: 'Tool' },
   error: { done: '工作流提示', running: '工作流提示', failed: '工作流已中断', panel: 'Error' },
 };
@@ -47,6 +48,7 @@ function stepKind(step: ExecutionStep): StepKind {
   if (step.type === 'command') return 'command';
   if (step.type === 'file_read' || step.type === 'file_write' || step.type === 'file_edit') return 'file';
   if (step.type === 'web_search' || step.type === 'web_fetch') return 'web';
+  if (step.type === 'research') return 'research';
   if (step.type === 'error_notice') return 'error';
   return 'tool';
 }
@@ -66,6 +68,8 @@ function StepIcon({ step }: { step: ExecutionStep }) {
       return <FileDiff className={cls} />;
     case 'web':
       return step.type === 'web_search' ? <Search className={cls} /> : <Globe className={cls} />;
+    case 'research':
+      return <Globe className={cls} />;
     case 'error':
       return <AlertTriangle className={cls} />;
     default:
@@ -135,7 +139,7 @@ function CodePanel({ children, tone = 'neutral' }: { children: React.ReactNode; 
   return (
     <div
       className={cn(
-        'codex-panel-reveal relative overflow-hidden rounded-[10px] bg-[#252525] text-[13px] shadow-sm',
+        'codex-panel-reveal codex-detail-panel relative overflow-hidden rounded-[10px] bg-[#252525] text-[13px] shadow-sm',
         tone === 'error' && 'bg-error/10',
       )}
     >
@@ -186,7 +190,11 @@ function StepDetails({ step }: { step: ExecutionStep }) {
   const subject = primarySubject(step);
   const showCommand = kind === 'command';
   const output = step.error || step.outputPreview || step.content || '';
-  const metadata = step.metadata ? compactJson(step.metadata) : '';
+  const toolResult = step.metadata?.result;
+  const metadata = step.metadata
+    ? compactJson({ ...step.metadata, result: undefined })
+    : '';
+  const gitToolName = String(step.metadata?.toolName ?? step.toolName ?? '');
 
   return (
     <CodePanel tone={step.status === 'failed' ? 'error' : 'neutral'}>
@@ -215,6 +223,9 @@ function StepDetails({ step }: { step: ExecutionStep }) {
             <SmoothStreamingText text={output} active={step.status === 'running'} chunkSize={5} />
           </pre>
         )}
+        {gitToolName.startsWith('git_') && toolResult !== undefined && toolResult !== null && (
+          <GitToolResultView toolName={gitToolName} result={toolResult} />
+        )}
         {metadata && (
           <pre className="mt-3 whitespace-pre-wrap break-words text-foreground-subtle">{metadata}</pre>
         )}
@@ -241,8 +252,77 @@ function StepDetails({ step }: { step: ExecutionStep }) {
   );
 }
 
+function GitToolResultView({ toolName, result }: { toolName: string; result: unknown }) {
+  if (!result || typeof result !== 'object') return null;
+  const data = result as Record<string, any>;
+  if (data.is_git_repo === false) {
+    return <div className="mt-3 rounded-md bg-white/[0.04] px-3 py-2 text-foreground-muted">当前 Workspace 不是 Git 仓库。</div>;
+  }
+  if (toolName === 'git_status') {
+    const rows = ['staged', 'modified', 'untracked', 'deleted', 'conflicts']
+      .flatMap((key) => (data[key] ?? []).map((path: string) => ({ key, path })));
+    return (
+      <div className="mt-3 space-y-2 rounded-md bg-white/[0.04] px-3 py-2 font-sans text-xs">
+        <div className="text-foreground">{data.branch || 'HEAD'} · {rows.length ? `${rows.length} changed` : 'Clean'}</div>
+        {rows.slice(0, 20).map((row) => (
+          <div key={`${row.key}-${row.path}`} className="flex gap-2 text-foreground-muted">
+            <span className="w-16 text-foreground-subtle">{row.key}</span>
+            <span className="min-w-0 truncate">{row.path}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (toolName === 'git_diff') {
+    const files = (data.files ?? []) as Array<{ path: string; additions: number; deletions: number; patch: string }>;
+    return (
+      <div className="mt-3 space-y-2 font-sans text-xs">
+        <div className="text-foreground-muted">
+          {files.length} files changed · <span className="text-success">+{data.additions ?? 0}</span>{' '}
+          <span className="text-error">-{data.deletions ?? 0}</span>
+        </div>
+        {files.slice(0, 5).map((file) => (
+          <details key={file.path} className="rounded-md bg-white/[0.04]" open={files.length === 1}>
+            <summary className="cursor-pointer px-3 py-2 text-foreground">
+              {file.path} <span className="text-success">+{file.additions}</span> <span className="text-error">-{file.deletions}</span>
+            </summary>
+            <pre className="max-h-56 overflow-auto border-t border-white/5 px-3 py-2 font-mono text-[11px] text-foreground-muted">{file.patch}</pre>
+          </details>
+        ))}
+      </div>
+    );
+  }
+  if (toolName === 'git_history') {
+    return (
+      <div className="mt-3 space-y-2 font-sans text-xs">
+        {(data.commits ?? []).slice(0, 10).map((commit: any) => (
+          <div key={commit.hash} className="rounded-md bg-white/[0.04] px-3 py-2">
+            <div className="truncate text-foreground">{commit.message}</div>
+            <div className="mt-1 flex gap-2 text-foreground-subtle">
+              <span className="font-mono">{commit.short_hash}</span>
+              <span>{commit.author}</span>
+              <span>{commit.date}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  return null;
+}
+
 function StepBlock({ step, last = false }: { step: ExecutionStep; last?: boolean }) {
-  const hasDetails = Boolean(step.content || step.inputPreview || step.outputPreview || step.error || step.metadata || step.subtitle);
+  const kind = stepKind(step);
+  const outputText = String(step.outputPreview || step.content || '').trim();
+  const isGenericCompletedThinking =
+    kind === 'thinking' &&
+    step.status !== 'running' &&
+    step.status !== 'retrying' &&
+    !step.error &&
+    !step.inputPreview &&
+    !step.metadata &&
+    (!outputText || outputText === '思考完成');
+  const hasDetails = !isGenericCompletedThinking && Boolean(step.content || step.inputPreview || step.outputPreview || step.error || step.metadata || step.subtitle);
   const disclosure = useExecutionDisclosure({
     id: step.id,
     status: step.status,
@@ -258,11 +338,11 @@ function StepBlock({ step, last = false }: { step: ExecutionStep; last?: boolean
 
   return (
     <TimelineShell icon={<StepIcon step={step} />} last={last} tone={tone}>
-      <div className="space-y-2 pb-1">
+      <div className="space-y-1.5 pb-0.5">
         <button
           type="button"
           className={cn(
-            'group flex max-w-full items-center gap-2 text-left text-[15px] font-medium transition-colors duration-200',
+            'group flex max-w-full items-center gap-2 text-left text-[14px] font-medium transition-colors duration-200',
             step.status === 'failed' ? 'text-error' : 'text-foreground-muted hover:text-foreground',
           )}
           onClick={() => hasDetails && disclosure.toggle()}
@@ -271,7 +351,7 @@ function StepBlock({ step, last = false }: { step: ExecutionStep; last?: boolean
             className="execution-title min-w-0 truncate"
             data-motion={disclosure.titleMotion}
             data-tone={disclosure.tone}
-            data-kind={stepKind(step)}
+            data-kind={kind}
           >
             <SmoothStreamingText text={stepHeading(step)} active={step.status === 'running' || step.status === 'retrying'} />
             {subject ? <span className="ml-1 text-foreground-subtle">{subject}</span> : null}
@@ -331,7 +411,7 @@ export function ExecutionSegmentCard({ segment }: ExecutionSegmentCardProps) {
   );
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-2.5">
       <TimelineShell
         icon={
           segment.status === 'running' ? (
@@ -366,7 +446,7 @@ export function ExecutionSegmentCard({ segment }: ExecutionSegmentCardProps) {
       </TimelineShell>
 
       <ExecutionCollapse open={open}>
-        <div className="space-y-4">
+        <div className="space-y-2.5">
           {segment.goal && (
             <TimelineShell icon={<span className="h-1.5 w-1.5 rounded-full bg-current" />} last={segment.steps.length === 0 && !segment.errors?.length}>
               <div className="text-[15px] leading-7 text-foreground">

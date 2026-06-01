@@ -419,6 +419,112 @@ def register_default_tools() -> None:
         )
     )
 
+    # Research Search
+    registry.register(
+        ToolDefinition(
+            name="research_search",
+            description=(
+                "Search the web through the local Research Core. Performs intent routing, "
+                "multi-engine recall, URL cleanup, ranking, deduplication, and returns "
+                "compact source snippets. Prefer this over deprecated web_search."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Research/search query"},
+                    "mode": {
+                        "type": "string",
+                        "enum": ["overview", "scholar", "dev", "live", "media", "deep_dive"],
+                        "description": "Search intent mode. Use overview by default.",
+                        "default": "overview",
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Maximum ranked results to return",
+                        "default": 20,
+                    },
+                    "language": {"type": "string", "description": "Preferred language", "default": "auto"},
+                },
+                "required": ["query"],
+            },
+            category="research",
+            requires_confirmation=False,
+        )
+    )
+
+    # Research Fetch
+    registry.register(
+        ToolDefinition(
+            name="research_fetch",
+            description=(
+                "Fetch one URL through the local Research Core. Returns a concise summary, "
+                "content_ref, content_hash, duplicate info, and crawl stats instead of "
+                "injecting full page text into the model context."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "URL to fetch"},
+                    "mode": {
+                        "type": "string",
+                        "enum": ["auto", "fast", "balanced", "deep", "ultra"],
+                        "description": "Fetch/crawl preset",
+                        "default": "auto",
+                    },
+                    "max_chars": {
+                        "type": "integer",
+                        "description": "Maximum extracted characters for the runtime to collect",
+                        "default": 20000,
+                    },
+                },
+                "required": ["url"],
+            },
+            category="research",
+            requires_confirmation=False,
+        )
+    )
+
+    # Deep Research
+    registry.register(
+        ToolDefinition(
+            name="deep_research",
+            description=(
+                "Run the full Research Core pipeline: search, crawl, deduplicate, build "
+                "evidence pack, and return compact sources/evidence/content_refs for a "
+                "research report. Use for broad or current web research tasks."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Research question"},
+                    "mode": {
+                        "type": "string",
+                        "enum": ["overview", "scholar", "dev", "live", "media", "deep_dive"],
+                        "description": "Research intent mode",
+                        "default": "deep_dive",
+                    },
+                    "max_results": {"type": "integer", "default": 15},
+                    "max_pages": {"type": "integer", "default": 8},
+                    "build_evidence": {"type": "boolean", "default": True},
+                },
+                "required": ["query"],
+            },
+            category="research",
+            requires_confirmation=False,
+        )
+    )
+
+    # Research Runtime Status
+    registry.register(
+        ToolDefinition(
+            name="research_status",
+            description="Check whether the local hollow-search-core Research runtime is healthy.",
+            parameters={"type": "object", "properties": {}},
+            category="research",
+            requires_confirmation=False,
+        )
+    )
+
     # Web Fetch (deep extraction via AGENT ENT Fetch Mini)
     registry.register(
         ToolDefinition(

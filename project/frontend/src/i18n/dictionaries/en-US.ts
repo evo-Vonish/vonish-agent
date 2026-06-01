@@ -11,6 +11,7 @@ const enUS: I18nDictionary = {
   "chat.exportDo": "Export",
   "chat.exporting": "Exporting…",
   "chat.revert": "Revert",
+  "chat.rename": "Rename",
   "chat.delete": "Delete",
   "chat.deleteConfirm": "Delete this conversation? Workspace files will be removed.",
   "chat.cancel": "Cancel",
@@ -96,6 +97,22 @@ const enUS: I18nDictionary = {
   "statusbar.collapseHint": "Collapse",
   "statusbar.more": "More",
 
+  "settings.panel.account": "Account",
+  "settings.panel.profile": "Profile",
+
+  "session.workspace": "Workspace",
+  "session.workspace.noProject": "No project",
+  "session.workspace.addProject": "Add project",
+  "session.workspace.searchProjects": "Search projects…",
+  "session.workspace.warning": "System root or system directories as Workspace is not recommended.",
+  "session.permission.audit": "Audit mode",
+  "session.permission.full": "Full access",
+  "session.permission.autoReview": "Auto review",
+  "session.permission.default": "Default permissions",
+  "session.directoryAccess": "Directory access",
+  "session.directoryAccess.locked": "Lock to workspace",
+  "session.directoryAccess.external": "Allow external access",
+
   "lang.zh": "中文（简体）",
   "lang.en": "English",
   "lang.ja": "日本語",
@@ -112,6 +129,7 @@ const enUS: I18nDictionary = {
   "toolCategory.python_ops": "Python",
   "toolCategory.web_search": "Web Search",
   "toolCategory.web_ops": "Web",
+  "toolCategory.research": "Research",
   "toolCategory.shell_ops": "Shell",
   "toolCategory.system": "System",
 

@@ -106,6 +106,7 @@ export interface ExecutionStep {
     | 'command'
     | 'web_search'
     | 'web_fetch'
+    | 'research'
     | 'recall'
     | 'user_interaction'
     | 'system_notice'
@@ -254,6 +255,64 @@ export interface GitStatus {
   error?: string;
 }
 
+export interface WorkspaceFilePreview {
+  path: string;
+  name?: string;
+  type: 'text' | 'image' | 'pdf' | 'office' | 'binary' | 'folder';
+  mime_type?: string;
+  size?: number;
+  modified_at?: string;
+  encoding?: 'utf-8' | 'base64' | '';
+  content?: string;
+  truncated?: boolean;
+  is_directory?: boolean;
+  children?: Array<{
+    name: string;
+    path: string;
+    type: 'file' | 'folder';
+    size?: number;
+    modified_at?: string;
+    mime_type?: string;
+  }>;
+}
+
+export interface GitDiffFile {
+  path: string;
+  additions: number;
+  deletions: number;
+  patch: string;
+}
+
+export interface GitDiffResult {
+  workspace_id?: string;
+  is_git_repo: boolean;
+  scope: string;
+  files: GitDiffFile[];
+  total_files?: number;
+  additions?: number;
+  deletions?: number;
+  success?: boolean;
+  error?: string;
+}
+
+export interface GitHistoryCommit {
+  hash: string;
+  short_hash: string;
+  author: string;
+  date: string;
+  message: string;
+}
+
+export interface GitHistoryResult {
+  workspace_id?: string;
+  is_git_repo: boolean;
+  mode: 'log' | 'blame';
+  commits?: GitHistoryCommit[];
+  lines?: Array<{ line?: number; commit?: string; author?: string; summary?: string; content?: string }>;
+  success?: boolean;
+  error?: string;
+}
+
 export interface Attachment {
   id: string;
   name: string;
@@ -279,4 +338,14 @@ export interface WorkspaceDiff {
   title: string;
   timestamp: number;
   changes: FileChange[];
+}
+
+// ── Session draft options (frontend-only, not sent to backend) ──
+export type PermissionDraftMode = 'full_access' | 'auto_review' | 'default';
+export type DirectoryAccessDraftMode = 'locked_workspace' | 'request_external';
+
+export interface SessionDraftOptions {
+  workspaceId: string | null;
+  permissionMode: PermissionDraftMode;
+  directoryAccessMode: DirectoryAccessDraftMode;
 }

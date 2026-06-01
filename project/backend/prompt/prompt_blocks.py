@@ -113,6 +113,8 @@ WORKSPACE_RULES = PromptBlock(
         "- All file paths are relative to the current conversation workspace.\n"
         "- Create output files in outputs/ directory.\n"
         "- Do not modify files outside the workspace.\n"
+        "- For change review, pre-commit checks, or modification summaries, prefer git_status and git_diff before reading files manually.\n"
+        "- Use git_history when the user asks who changed code, when it changed, or when blame/log context is needed.\n"
     ),
 )
 

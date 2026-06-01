@@ -3,6 +3,7 @@ import type { I18nDictionary } from "../types";
 const jaJP: I18nDictionary = {
   "chat.new": "新規チャット",
   "chat.search": "会話を検索",
+  "chat.rename": "名前変更",
   "chat.delete": "削除",
   "chat.deleteConfirm": "この会話を削除しますか？ワークスペースも削除されます。",
   "chat.cancel": "キャンセル",
@@ -86,6 +87,22 @@ const jaJP: I18nDictionary = {
   "statusbar.collapseHint": "閉じる",
   "statusbar.more": "その他",
 
+  "settings.panel.account": "アカウント",
+  "settings.panel.profile": "プロフィール",
+
+  "session.workspace": "ワークスペース",
+  "session.workspace.noProject": "プロジェクトなし",
+  "session.workspace.addProject": "プロジェクト追加",
+  "session.workspace.searchProjects": "プロジェクト検索…",
+  "session.workspace.warning": "システムルートをWorkspaceにすることは推奨されません。",
+  "session.permission.audit": "監査モード",
+  "session.permission.full": "フルアクセス",
+  "session.permission.autoReview": "自動レビュー",
+  "session.permission.default": "デフォルト権限",
+  "session.directoryAccess": "ディレクトリ",
+  "session.directoryAccess.locked": "固定",
+  "session.directoryAccess.external": "外部アクセス許可",
+
   "lang.zh": "中文（简体）",
   "lang.en": "English",
   "lang.ja": "日本語",
@@ -102,6 +119,7 @@ const jaJP: I18nDictionary = {
   "toolCategory.python_ops": "Python",
   "toolCategory.web_search": "Web検索",
   "toolCategory.web_ops": "ウェブ",
+  "toolCategory.research": "Research",
   "toolCategory.shell_ops": "シェル",
   "toolCategory.system": "システム",
 

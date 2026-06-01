@@ -62,9 +62,59 @@ class ToolPromptRegistry:
         "web_search": {
             "intro": (
                 "## Tool: web_search\n"
-                "Search the web using DuckDuckGo.\n"
-                "Returns title + URL results.\n"
-                "Use web_fetch afterward to get full page content if needed.\n"
+                "Deprecated compatibility wrapper. Prefer research_search.\n"
+            ),
+        },
+        "research_search": {
+            "intro": (
+                "## Tool: research_search\n"
+                "Use for web search. It routes intent, searches multiple engines, cleans URLs, ranks quality, and deduplicates.\n"
+                "Returns compact snippets only. Follow with research_fetch for specific pages or deep_research for full research.\n"
+            ),
+        },
+        "research_fetch": {
+            "intro": (
+                "## Tool: research_fetch\n"
+                "Fetch one URL through Research Core. It returns summary + content_ref + content_hash, not full page text.\n"
+                "Use content_ref as evidence reference; do not ask for full page text unless required.\n"
+            ),
+        },
+        "deep_research": {
+            "intro": (
+                "## Tool: deep_research\n"
+                "Run the full research pipeline: search, crawl, dedupe, evidence pack, and compact source refs.\n"
+                "Use for current events, broad research questions, or when citations/evidence are needed.\n"
+                "Results are budget-protected: use evidence_pack and content_refs rather than full page bodies.\n"
+            ),
+        },
+        "research_status": {
+            "intro": (
+                "## Tool: research_status\n"
+                "Check whether the local Research Core runtime is healthy before diagnosing web research failures.\n"
+            ),
+        },
+        "git_status": {
+            "intro": (
+                "## Tool: git_status\n"
+                "Inspect the current workspace Git status.\n"
+                "Use before summarizing changes, reviewing modifications, or checking whether files are dirty.\n"
+                "This is read-only and workspace-bound.\n"
+            ),
+        },
+        "git_diff": {
+            "intro": (
+                "## Tool: git_diff\n"
+                "Read workspace Git diffs for working tree, staged changes, a single file, or a commit.\n"
+                "Use when the user asks what changed, before reporting completed edits, and before commit-style summaries.\n"
+                "This is read-only and workspace-bound.\n"
+            ),
+        },
+        "git_history": {
+            "intro": (
+                "## Tool: git_history\n"
+                "Read workspace Git log or blame information.\n"
+                "Use for history, authorship, regression, or line provenance questions.\n"
+                "This is read-only and workspace-bound.\n"
             ),
         },
     }

@@ -19,7 +19,7 @@ interface MessageBubbleProps {
 function AssistantTextBlock({ content }: { content: string }) {
   if (!content) return null;
   return (
-    <div className="mb-2 w-full px-0.5 py-0.5 text-[15px] leading-7 text-foreground">
+    <div className="mb-1 w-full px-0.5 py-0.5 text-[15px] leading-7 text-foreground">
       <MarkdownRenderer content={content} />
     </div>
   );
@@ -99,17 +99,17 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
   return (
     <div
       className={cn(
-        'group flex gap-3 px-3 sm:px-4 py-3 hover:bg-white/[0.01] transition-colors',
+        'group flex gap-3 px-3 sm:px-4 py-2.5 transition-colors',
         isUser && 'flex-row-reverse',
         className,
       )}
     >
       <div
         className={cn(
-          'w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 shadow-sm',
-          isUser && 'bg-primary/15 text-primary',
-          isAssistant && 'bg-success/15 text-success',
-          message.role === 'system' && 'bg-warning/15 text-warning',
+          'w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5',
+          isUser && 'text-foreground-subtle',
+          isAssistant && 'text-success',
+          message.role === 'system' && 'text-warning',
         )}
       >
         {isUser && <User className="w-3.5 h-3.5" />}
@@ -117,17 +117,14 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
         {message.role === 'system' && <Bot className="w-3.5 h-3.5" />}
       </div>
 
-      <div
-        className={cn('flex-1 min-w-0', isUser && 'flex flex-col items-end')}
-        style={{ maxWidth: isUser ? '85%' : '100%' }}
-      >
+      <div className={cn('min-w-0', isUser ? 'ml-auto flex w-auto max-w-[72%] flex-col items-end' : 'flex-1')}>
         <span className="text-[10px] text-foreground-subtle mb-1.5 font-medium select-none">
           {isUser ? t('user.label') : isAssistant ? t('assistant.label') : t('system.label')}
         </span>
 
         {isUser && hasContent && (
           <div
-            className="rounded-2xl mb-2 bg-primary/15 text-foreground px-4 py-2.5 border border-primary/10"
+            className="mb-1 max-w-full px-1 py-1 text-right text-foreground"
             style={{ maxWidth: '100%' }}
           >
             <MarkdownRenderer content={message.content} />
@@ -143,7 +140,7 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
         )}
 
         {!isUser && hasSegments && (
-          <div className="space-y-4 w-full">
+          <div className="w-full space-y-2.5">
             {message.segments?.map((segment) => (
               <SegmentRenderer key={segment.id} segment={segment} />
             ))}
@@ -154,7 +151,7 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
           <>
             {((message.thinkingBlocks && message.thinkingBlocks.length > 0) ||
               message.thinkingContent) && (
-              <div className="space-y-4 mb-2 w-full">
+              <div className="mb-1 w-full space-y-2.5">
                 {message.thinkingBlocks?.map((block, i) => (
                   <ThinkingCard key={`think-${i}`} content={block} />
                 ))}
@@ -170,7 +167,7 @@ export function MessageBubble({ message, className }: MessageBubbleProps) {
             )}
 
             {message.toolCalls && message.toolCalls.length > 0 && (
-              <div className="space-y-4 w-full">
+              <div className="w-full space-y-2.5">
                 {message.toolCalls.map((tool) => (
                   <ToolCard key={tool.id} tool={tool} />
                 ))}

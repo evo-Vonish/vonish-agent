@@ -24,6 +24,7 @@ const CATEGORY_ICON_MAP: Record<string, React.ComponentType<any>> = {
   python_ops: Code2,
   web_search: Globe,
   web_ops: Globe,
+  research: Globe,
   shell_ops: Terminal,
   system: Terminal,
 };
@@ -162,6 +163,16 @@ export function ToolCard({ tool }: ToolCardProps) {
           </pre>
           {/* Tool metadata */}
           <div className="flex flex-wrap gap-3 mt-2 text-[10px] text-foreground-subtle">
+            <span className="flex items-center gap-1">
+              <span className="text-foreground-muted">Risk:</span>
+              <span className={cn(tool.riskLevel === 'high' && 'text-error', tool.riskLevel === 'medium' && 'text-warning')}>
+                {tool.riskLevel ?? 'low'}
+              </span>
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="text-foreground-muted">Workspace:</span>
+              <span>{tool.workspaceBound ? t('tool.yes') : t('tool.no')}</span>
+            </span>
             <span className="flex items-center gap-1">
               <span className="text-foreground-muted">{t('tool.capabilities')}:</span>
               <span>{tool.capabilities.join(', ') || 'none'}</span>

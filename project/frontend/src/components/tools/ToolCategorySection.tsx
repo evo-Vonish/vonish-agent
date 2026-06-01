@@ -22,6 +22,7 @@ const CATEGORY_ICON_MAP: Record<ToolCategoryType, React.ComponentType<{ classNam
   python_ops: Code2,
   web_search: Globe,
   web_ops: Globe,
+  research: Globe,
   shell_ops: Terminal,
   system: Terminal,
 };
@@ -50,9 +51,10 @@ function LayoutIcon({ className }: { className?: string }) {
 interface ToolCategorySectionProps {
   category: ToolCategoryType;
   searchQuery?: string;
+  filterMode?: 'all' | 'enabled' | 'failed' | 'high_risk';
 }
 
-export function ToolCategorySection({ category, searchQuery = '' }: ToolCategorySectionProps) {
+export function ToolCategorySection({ category, searchQuery = '', filterMode = 'all' }: ToolCategorySectionProps) {
   const [collapsed, setCollapsed] = useState(false);
   const normalizedQuery = searchQuery.trim().toLowerCase();
   const { t } = useI18n();
@@ -63,7 +65,11 @@ export function ToolCategorySection({ category, searchQuery = '' }: ToolCategory
           t.category === category &&
           (!normalizedQuery ||
             t.name.toLowerCase().includes(normalizedQuery) ||
-            t.description.toLowerCase().includes(normalizedQuery)),
+            t.description.toLowerCase().includes(normalizedQuery)) &&
+          (filterMode === 'all' ||
+            (filterMode === 'enabled' && t.isEnabled) ||
+            (filterMode === 'failed' && t.lastStatus === 'failed') ||
+            (filterMode === 'high_risk' && (t.riskLevel === 'high' || t.approvalLevel === 'required'))),
       ),
     ),
   );

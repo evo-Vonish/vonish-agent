@@ -163,8 +163,21 @@ _TOOL_COMPRESSION_CONFIG: dict[str, dict[str, Any]] = {
         "description": "Keep last N chars (most recent output is important).",
     },
     "web_search": {
+        "strategy": "truncate",
+        "max_tokens": 4000,
+        "description": "Legacy web search compatibility output — truncate.",
+    },
+    "research_search": {
         "strategy": "full",
-        "description": "Search results are already concise — keep full.",
+        "description": "Research search output is compact ranked snippets — keep full.",
+    },
+    "research_fetch": {
+        "strategy": "reference",
+        "description": "Fetched web pages must stay behind content_ref, never full context.",
+    },
+    "deep_research": {
+        "strategy": "reference",
+        "description": "Deep research returns evidence and refs; store large page bodies by reference.",
     },
     "list_dir": {
         "strategy": "full",

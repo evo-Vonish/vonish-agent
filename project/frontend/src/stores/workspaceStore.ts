@@ -51,7 +51,10 @@ function buildFileTree(items: WorkspaceFileItem[], git: GitStatus | null = null)
   // Sort: directories first, then alphabetically
   const sorted = [...items].sort((a, b) => {
     if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
-    return a.name.localeCompare(b.name);
+    const depthA = a.path.split('/').length;
+    const depthB = b.path.split('/').length;
+    if (depthA !== depthB) return depthA - depthB;
+    return a.path.localeCompare(b.path);
   });
 
   for (const item of sorted) {

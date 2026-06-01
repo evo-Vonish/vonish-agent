@@ -3,6 +3,7 @@ import type { I18nDictionary } from "../types";
 const deDE: I18nDictionary = {
   "chat.new": "Neuer Chat",
   "chat.search": "Chats durchsuchen",
+  "chat.rename": "Umbenennen",
   "chat.delete": "Löschen",
   "chat.deleteConfirm": "Chat löschen? Arbeitsbereich wird ebenfalls entfernt.",
   "chat.cancel": "Abbrechen",
@@ -86,6 +87,22 @@ const deDE: I18nDictionary = {
   "statusbar.collapseHint": "Einklappen",
   "statusbar.more": "Mehr",
 
+  "settings.panel.account": "Konto",
+  "settings.panel.profile": "Profil",
+
+  "session.workspace": "Arbeitsbereich",
+  "session.workspace.noProject": "Kein Projekt",
+  "session.workspace.addProject": "Projekt hinzufügen",
+  "session.workspace.searchProjects": "Projekte suchen…",
+  "session.workspace.warning": "System-Root als Workspace wird nicht empfohlen.",
+  "session.permission.audit": "Prüfmodus",
+  "session.permission.full": "Vollzugriff",
+  "session.permission.autoReview": "Auto-Prüfung",
+  "session.permission.default": "Standard",
+  "session.directoryAccess": "Verzeichniszugriff",
+  "session.directoryAccess.locked": "Fixiert",
+  "session.directoryAccess.external": "Externer Zugriff erlaubt",
+
   "lang.zh": "中文（简体）",
   "lang.en": "English",
   "lang.ja": "日本語",
@@ -102,6 +119,7 @@ const deDE: I18nDictionary = {
   "toolCategory.python_ops": "Python",
   "toolCategory.web_search": "Websuche",
   "toolCategory.web_ops": "Web",
+  "toolCategory.research": "Recherche",
   "toolCategory.shell_ops": "Shell",
   "toolCategory.system": "System",
 

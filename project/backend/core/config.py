@@ -94,6 +94,28 @@ class Settings(BaseSettings):
     port: int = Field(default=8000, alias="PORT")
     reload: bool = Field(default=False, alias="RELOAD")
 
+    # Research Core runtime
+    hollow_search_core_enabled: bool = Field(
+        default=True,
+        alias="HOLLOW_SEARCH_CORE_ENABLED",
+    )
+    hollow_search_core_url: str = Field(
+        default="http://127.0.0.1:3000",
+        alias="HOLLOW_SEARCH_CORE_URL",
+    )
+    hollow_search_core_timeout: float = Field(
+        default=120.0,
+        alias="HOLLOW_SEARCH_CORE_TIMEOUT",
+    )
+    hollow_search_core_auto_start: bool = Field(
+        default=True,
+        alias="HOLLOW_SEARCH_CORE_AUTO_START",
+    )
+    hollow_search_core_path: str = Field(
+        default=str(BACKEND_DIR / "tool_runtimes" / "hollow_search_core"),
+        alias="HOLLOW_SEARCH_CORE_PATH",
+    )
+
     @property
     def async_database_url(self) -> str:
         """Ensure async driver is used."""

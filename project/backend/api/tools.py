@@ -40,6 +40,10 @@ class ToolExecuteRequest(BaseModel):
     conversation_id: str = Field(default="", description="Conversation context")
 
 
+class ToolEnabledRequest(BaseModel):
+    enabled: bool = Field(..., description="Whether the tool is enabled")
+
+
 class ToolResponse(BaseModel):
     """Tool execution response."""
 
@@ -122,6 +126,23 @@ async def tool_categories(
     return {"categories": categories}
 
 
+@router.patch("/tools/{tool_name}/enabled")
+async def set_tool_enabled_state(
+    tool_name: str,
+    request: ToolEnabledRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    registry = ToolRegistry()
+    if registry.get(tool_name) is None:
+        raise HTTPException(status_code=404, detail=f"Tool not found: {tool_name}")
+
+    from api.prompt import set_tool_enabled
+
+    set_tool_enabled(tool_name, request.enabled)
+    return {"tool": tool_name, "enabled": request.enabled}
+
+
 @router.post("/tools/execute", response_model=ToolResponse)
 async def execute_tool(
     request: ToolExecuteRequest,
@@ -140,6 +161,13 @@ async def execute_tool(
     if tool_def is None:
         raise HTTPException(
             status_code=404, detail=f"Tool not found: {request.tool}"
+        )
+
+    configs = get_all_tool_configs()
+    if not configs.get(request.tool, True):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Tool '{request.tool}' is disabled. Enable it in the Tool Management panel.",
         )
 
     # Validate arguments

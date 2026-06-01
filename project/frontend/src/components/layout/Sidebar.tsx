@@ -16,6 +16,7 @@ import {
   RefreshCw,
   ExternalLink,
   GitBranch,
+  Pencil,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
@@ -26,6 +27,7 @@ import type { FileNode } from '@/types';
 import { formatTime } from '@/lib/utils';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { searchConversations, type ConversationSearchResult } from '@/services/api';
+import { WorkspacePanel } from '@/components/workspace/WorkspacePanel';
 
 interface SidebarProps {
   className?: string;
@@ -557,12 +559,6 @@ export function Sidebar({ className }: SidebarProps) {
                     selectConversation(conv.id);
                     setSearchQuery('');
                   }}
-                  onDoubleClick={() => {
-                    if (!isSearching) {
-                      setRenameOpen(conv.id);
-                      setRenameText(conv.title);
-                    }
-                  }}
                 >
                   <MessageSquare className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
                   <div className="flex-1 min-w-0">
@@ -608,29 +604,46 @@ export function Sidebar({ className }: SidebarProps) {
                     )}
                   </div>
 
-                {/* Export button */}
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setExportOpen(conv.id);
-                  }}
-                  className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-primary/20 hover:text-primary transition-all"
-                  title={t('chat.export')}
-                >
-                  <Download className="w-3 h-3" />
-                </button>
-
-                {/* Delete button */}
-                <div className="relative">
+                {/* Action buttons */}
+                <div className="flex items-center gap-0.5 flex-shrink-0">
+                  {/* Rename button */}
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      setDeleteMenuOpen(deleteMenuOpen === conv.id ? null : conv.id);
+                      if (!isSearching) {
+                        setRenameOpen(conv.id);
+                        setRenameText(conv.title);
+                      }
                     }}
-                    className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-error/20 hover:text-error transition-all"
+                    className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-primary/20 hover:text-primary transition-all"
+                    title={t('chat.rename')}
                   >
-                    <Trash2 className="w-3 h-3" />
+                    <Pencil className="w-3 h-3" />
                   </button>
+
+                  {/* Export button */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setExportOpen(conv.id);
+                    }}
+                    className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-primary/20 hover:text-primary transition-all"
+                    title={t('chat.export')}
+                  >
+                    <Download className="w-3 h-3" />
+                  </button>
+
+                  {/* Delete button */}
+                  <div className="relative">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeleteMenuOpen(deleteMenuOpen === conv.id ? null : conv.id);
+                      }}
+                      className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-error/20 hover:text-error transition-all"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
 
                     {/* Confirmation popover */}
                     {deleteMenuOpen === conv.id && (
@@ -664,6 +677,7 @@ export function Sidebar({ className }: SidebarProps) {
                     )}
                   </div>
                 </div>
+              </div>
               );
             })}
           </div>
@@ -732,78 +746,7 @@ export function Sidebar({ className }: SidebarProps) {
 
       {/* File tree */}
       {activeTab === 'files' && (
-        <div className="flex-1 overflow-y-auto p-2">
-          <div className="mb-2 rounded-[14px] border border-white/10 bg-[#202020] p-2">
-            <div className="mb-2 flex items-center gap-2">
-              <select
-                value={activeWorkspaceId ?? currentConversationId ?? ''}
-                onChange={(event) => {
-                  if (event.target.value) void selectWorkspacePanel(event.target.value);
-                }}
-                className="min-w-0 flex-1 rounded-md border border-white/10 bg-background px-2 py-1 text-xs text-foreground outline-none"
-              >
-                {!activeWorkspaceId && <option value="">Workspace</option>}
-                {workspaces.map((workspace) => (
-                  <option key={workspace.id} value={workspace.id}>
-                    {workspace.name}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={() => void refreshActiveWorkspace()}
-                className="rounded-md p-1.5 text-foreground-muted transition-colors hover:bg-white/[0.07] hover:text-foreground"
-                title="刷新 Workspace"
-              >
-                <RefreshCw className={cn('h-3.5 w-3.5', wsLoading && 'animate-spin')} />
-              </button>
-              <button
-                type="button"
-                onClick={() => void openActiveWorkspace()}
-                className="rounded-md p-1.5 text-foreground-muted transition-colors hover:bg-white/[0.07] hover:text-foreground"
-                title="打开本地目录"
-              >
-                <ExternalLink className="h-3.5 w-3.5" />
-              </button>
-            </div>
-            <div className="flex items-center gap-2 text-[11px] text-foreground-subtle">
-              <GitBranch className="h-3.5 w-3.5" />
-              {gitStatus?.is_git_repo ? (
-                <>
-                  <span className="truncate">{gitStatus.branch || 'HEAD'}</span>
-                  <span>·</span>
-                  <span className={gitStatus.is_dirty ? 'text-warning' : 'text-success'}>
-                    {gitStatus.is_dirty
-                      ? `${[
-                          ...(gitStatus.staged ?? []),
-                          ...(gitStatus.modified ?? []),
-                          ...(gitStatus.untracked ?? []),
-                          ...(gitStatus.deleted ?? []),
-                          ...(gitStatus.conflicts ?? []),
-                        ].length} modified`
-                      : 'Clean'}
-                  </span>
-                </>
-              ) : (
-                <span>未初始化 Git</span>
-              )}
-            </div>
-          </div>
-          {!activeWorkspaceId ? (
-            <p className="text-xs text-foreground-subtle p-2">{t('nav.workspace.empty')}</p>
-          ) : wsLoading ? (
-            <div className="flex items-center gap-2 p-2 text-xs text-foreground-muted">
-              <Loader2 className="w-3 h-3 animate-spin" />
-              {t('nav.workspace.loading')}
-            </div>
-          ) : wsLoaded && fileTree.length === 0 ? (
-            <p className="text-xs text-foreground-subtle p-2">{t('nav.workspace.noFiles')}</p>
-          ) : (
-            fileTree.map((node) => (
-              <FileTreeItem key={node.id} node={node} />
-            ))
-          )}
-        </div>
+        <WorkspacePanel currentConversationId={currentConversationId} />
       )}
     </aside>
   );

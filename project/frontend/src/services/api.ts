@@ -1,4 +1,15 @@
-import type { Conversation, GitStatus, MessageSegment, Model, ToolCall, UploadedFileMeta, WorkspaceSummary } from '@/types';
+import type {
+  Conversation,
+  GitDiffResult,
+  GitHistoryResult,
+  GitStatus,
+  MessageSegment,
+  Model,
+  ToolCall,
+  UploadedFileMeta,
+  WorkspaceFilePreview,
+  WorkspaceSummary,
+} from '@/types';
 
 interface BackendConversation {
   id: string;
@@ -319,6 +330,71 @@ export async function refreshWorkspace(workspaceId: string): Promise<{ files: Wo
   return (await response.json()) as { files: WorkspaceFileItem[]; git: GitStatus };
 }
 
+export async function previewWorkspaceFile(workspaceId: string, path: string): Promise<WorkspaceFilePreview> {
+  const params = new URLSearchParams({ path });
+  const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/preview?${params}`);
+  if (!response.ok) throw new Error(`Failed to preview file: HTTP ${response.status}`);
+  return (await response.json()) as WorkspaceFilePreview;
+}
+
+export async function createWorkspaceItem(
+  workspaceId: string,
+  input: { path: string; type: 'file' | 'folder'; content?: string },
+): Promise<{ status: string; type: string; path: string; size?: number }> {
+  const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/items`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) throw new Error(`Failed to create workspace item: HTTP ${response.status}`);
+  return (await response.json()) as { status: string; type: string; path: string; size?: number };
+}
+
+export async function uploadWorkspaceFiles(
+  workspaceId: string,
+  files: File[],
+  subdir = 'uploads',
+): Promise<{ uploaded: WorkspaceFileItem[]; failed: { name: string; error: string }[]; total: number; successful: number }> {
+  const formData = new FormData();
+  files.forEach((file) => formData.append('files', file));
+  const params = new URLSearchParams({ subdir });
+  const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/upload?${params}`, {
+    method: 'POST',
+    body: formData,
+  });
+  if (!response.ok) throw new Error(`Failed to upload files: HTTP ${response.status}`);
+  return (await response.json()) as { uploaded: WorkspaceFileItem[]; failed: { name: string; error: string }[]; total: number; successful: number };
+}
+
+export async function getWorkspaceGitDiff(
+  workspaceId: string,
+  input: { scope?: string; filePath?: string; contextLines?: number; commit?: string } = {},
+): Promise<GitDiffResult> {
+  const params = new URLSearchParams();
+  params.set('scope', input.scope ?? 'working');
+  if (input.filePath) params.set('file_path', input.filePath);
+  if (input.contextLines !== undefined) params.set('context_lines', String(input.contextLines));
+  if (input.commit) params.set('commit', input.commit);
+  const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/git/diff?${params}`);
+  if (!response.ok) throw new Error(`Failed to load git diff: HTTP ${response.status}`);
+  return (await response.json()) as GitDiffResult;
+}
+
+export async function getWorkspaceGitHistory(
+  workspaceId: string,
+  input: { mode?: 'log' | 'blame'; filePath?: string; lineStart?: number; lineEnd?: number; limit?: number } = {},
+): Promise<GitHistoryResult> {
+  const params = new URLSearchParams();
+  params.set('mode', input.mode ?? 'log');
+  if (input.filePath) params.set('file_path', input.filePath);
+  if (input.lineStart !== undefined) params.set('line_start', String(input.lineStart));
+  if (input.lineEnd !== undefined) params.set('line_end', String(input.lineEnd));
+  if (input.limit !== undefined) params.set('limit', String(input.limit));
+  const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/git/history?${params}`);
+  if (!response.ok) throw new Error(`Failed to load git history: HTTP ${response.status}`);
+  return (await response.json()) as GitHistoryResult;
+}
+
 /**
  * Call backend to stop/interrupt an ongoing chat stream.
  */
@@ -634,12 +710,20 @@ export async function fetchToolConfigs(): Promise<{ tools: Record<string, boolea
 }
 
 export async function enableTool(name: string): Promise<void> {
-  const response = await fetch(`/api/tools/${encodeURIComponent(name)}/enable`, { method: 'POST' });
+  const response = await fetch(`/api/tools/${encodeURIComponent(name)}/enabled`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled: true }),
+  });
   if (!response.ok) throw new Error(`Failed to enable tool: HTTP ${response.status}`);
 }
 
 export async function disableTool(name: string): Promise<void> {
-  const response = await fetch(`/api/tools/${encodeURIComponent(name)}/disable`, { method: 'POST' });
+  const response = await fetch(`/api/tools/${encodeURIComponent(name)}/enabled`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled: false }),
+  });
   if (!response.ok) throw new Error(`Failed to disable tool: HTTP ${response.status}`);
 }
 

@@ -12,8 +12,11 @@ Provides:
 from __future__ import annotations
 
 import os
+import base64
+import mimetypes
 from pathlib import Path
 from typing import Any
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from pydantic import BaseModel, Field
@@ -62,6 +65,15 @@ class CreateWorkspaceItemRequest(BaseModel):
     content: str = Field(default="", description="Initial file content")
 
 
+TEXT_PREVIEW_EXTENSIONS = {
+    ".txt", ".md", ".markdown", ".py", ".ts", ".tsx", ".js", ".jsx", ".json",
+    ".css", ".scss", ".html", ".xml", ".yaml", ".yml", ".toml", ".ini", ".cfg",
+    ".csv", ".tsv", ".log", ".sql", ".sh", ".ps1", ".bat",
+}
+
+MAX_PREVIEW_BYTES = 512 * 1024
+
+
 # ---------------------------------------------------------------------------
 # Workspace Manager
 # ---------------------------------------------------------------------------
@@ -75,6 +87,71 @@ def get_workspace_manager() -> WorkspaceManager:
     if _workspace_manager is None:
         _workspace_manager = WorkspaceManager()
     return _workspace_manager
+
+
+def _safe_workspace_child(workspace_id: str, rel_path: str = "") -> Path:
+    root = workspace_root(workspace_id)
+    raw = (rel_path or "").replace("\\", "/").strip().lstrip("/")
+    target = (root / raw).resolve()
+    if target != root and root not in target.parents:
+        raise HTTPException(status_code=400, detail="Path escape blocked")
+    return target
+
+
+def _relative_path(root: Path, path: Path) -> str:
+    return str(path.relative_to(root)).replace("\\", "/")
+
+
+def _file_item(root: Path, path: Path) -> dict[str, Any]:
+    stat = path.stat()
+    rel = _relative_path(root, path)
+    mime, _ = mimetypes.guess_type(path.name)
+    return {
+        "name": path.name,
+        "path": rel,
+        "size": stat.st_size if path.is_file() else 0,
+        "mime_type": mime or "inode/directory" if path.is_dir() else mime or "application/octet-stream",
+        "is_directory": path.is_dir(),
+        "type": "folder" if path.is_dir() else "file",
+        "modified_at": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+    }
+
+
+def _iter_workspace_files(root: Path, subdir: str = "", recursive: bool = False) -> list[dict[str, Any]]:
+    start = _safe_workspace_child(root.name, subdir)
+    if not start.exists() or not start.is_dir():
+        return []
+    iterator = start.rglob("*") if recursive else start.iterdir()
+    items: list[dict[str, Any]] = []
+    for path in iterator:
+        try:
+            rel = _relative_path(root, path)
+            if rel == ".workspace" or rel.startswith(".workspace/"):
+                continue
+            if any(part in {"__pycache__", ".git"} for part in path.relative_to(root).parts):
+                continue
+            items.append(_file_item(root, path))
+        except OSError:
+            continue
+    return sorted(items, key=lambda item: (item["type"] != "folder", item["path"].lower()))
+
+
+async def _workspace_summary(workspace_id: str, name: str, active_conversation_id: str | None, last_opened_at: str = "") -> dict[str, Any]:
+    path = workspace_root(workspace_id)
+    status = await git_status(workspace_id)
+    file_count = sum(1 for p in path.rglob("*") if p.is_file() and ".git" not in p.parts and ".workspace" not in p.parts) if path.exists() else 0
+    modified_count = sum(len(status.get(key, [])) for key in ("staged", "modified", "untracked", "deleted", "conflicts"))
+    return {
+        "id": workspace_id,
+        "name": name,
+        "rootPath": str(path),
+        "activeConversationId": active_conversation_id,
+        "isGitRepo": bool(status.get("is_git_repo")),
+        "branch": status.get("branch"),
+        "fileCount": file_count,
+        "modifiedCount": modified_count,
+        "lastOpenedAt": last_opened_at,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -101,40 +178,26 @@ async def list_workspaces(
 
     for conv in conversations:
         workspace_id = str(conv.id)
-        path = workspace_root(workspace_id)
-        status = await git_status(workspace_id)
         items.append(
-            {
-                "id": workspace_id,
-                "name": conv.title or workspace_id[:8],
-                "rootPath": str(path),
-                "activeConversationId": workspace_id,
-                "isGitRepo": bool(status.get("is_git_repo")),
-                "branch": status.get("branch"),
-                "fileCount": sum(1 for p in path.rglob("*") if p.is_file()) if path.exists() else 0,
-                "modifiedCount": sum(len(status.get(key, [])) for key in ("staged", "modified", "untracked", "deleted", "conflicts")),
-                "lastOpenedAt": conv.updated_at.isoformat() if conv.updated_at else "",
-            }
+            await _workspace_summary(
+                workspace_id,
+                conv.title or workspace_id[:8],
+                workspace_id,
+                conv.updated_at.isoformat() if conv.updated_at else "",
+            )
         )
         seen.add(workspace_id)
 
     for child in root.iterdir():
         if not child.is_dir() or child.name in seen:
             continue
-        status = await git_status(child.name)
         conv = by_id.get(child.name)
         items.append(
-            {
-                "id": child.name,
-                "name": conv.title if conv else child.name,
-                "rootPath": str(child),
-                "activeConversationId": child.name if conv else None,
-                "isGitRepo": bool(status.get("is_git_repo")),
-                "branch": status.get("branch"),
-                "fileCount": sum(1 for p in child.rglob("*") if p.is_file()),
-                "modifiedCount": sum(len(status.get(key, [])) for key in ("staged", "modified", "untracked", "deleted", "conflicts")),
-                "lastOpenedAt": "",
-            }
+            await _workspace_summary(
+                child.name,
+                conv.title if conv else child.name,
+                child.name if conv else None,
+            )
         )
 
     return {"workspaces": sorted(items, key=lambda item: item["name"].lower()), "total": len(items)}
@@ -149,30 +212,13 @@ async def list_workspace_files(
     user: User = Depends(get_current_user),
 ):
     """List files in the workspace. Returns empty list if workspace not yet created."""
-    from workspace.workspace_manager import WorkspaceError
-
-    manager = get_workspace_manager()
-    try:
-        if recursive:
-            files = await manager.list_files_recursive(conversation_id, path or "")
-        else:
-            files = await manager.list_files(conversation_id, path or "")
-    except WorkspaceError:
-        return {"files": [], "workspace_id": conversation_id, "path": path or "", "recursive": recursive}
-
+    root = workspace_root(conversation_id)
+    files = _iter_workspace_files(root, path or "", recursive)
     return {
-        "files": [
-            {
-                "name": f.name,
-                "path": f.path,
-                "size": f.size,
-                "mime_type": f.mime_type,
-                "is_directory": f.is_directory,
-                "type": "folder" if f.is_directory else "file",
-                "modified_at": f.modified_at.isoformat() if f.modified_at else None,
-            }
-            for f in files
-        ],
+        "workspace_id": conversation_id,
+        "path": path or "",
+        "recursive": recursive,
+        "files": files,
         "total": len(files),
     }
 
@@ -249,6 +295,110 @@ async def refresh_workspace(
     return {"workspace_id": conversation_id, "files": files.get("files", []), "git": status}
 
 
+@router.post("/workspaces/{conversation_id}/items")
+async def create_workspace_item(
+    conversation_id: str,
+    request: CreateWorkspaceItemRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    target = _safe_workspace_child(conversation_id, request.path)
+    item_type = request.type.lower()
+    try:
+        if item_type in {"folder", "directory", "dir"}:
+            target.mkdir(parents=True, exist_ok=True)
+            return {"status": "created", "type": "folder", "path": request.path}
+        if target.exists() and target.is_dir():
+            raise HTTPException(status_code=409, detail="A folder already exists at this path")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(request.content or "", encoding="utf-8")
+        return {"status": "created", "type": "file", "path": request.path, "size": target.stat().st_size}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/workspaces/{conversation_id}/upload")
+async def upload_workspace_files(
+    conversation_id: str,
+    files: list[UploadFile] = File(...),
+    subdir: str = "uploads",
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    target_dir = _safe_workspace_child(conversation_id, subdir or "uploads")
+    target_dir.mkdir(parents=True, exist_ok=True)
+    root = workspace_root(conversation_id)
+    saved: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+    for upload in files:
+        safe_name = Path(upload.filename or "upload.bin").name
+        if not safe_name:
+            safe_name = "upload.bin"
+        target = (target_dir / safe_name).resolve()
+        if target != root and root not in target.parents:
+            failed.append({"name": safe_name, "error": "Path escape blocked"})
+            continue
+        try:
+            data = await upload.read()
+            target.write_bytes(data)
+            saved.append(_file_item(root, target))
+        except Exception as exc:
+            failed.append({"name": safe_name, "error": str(exc)})
+    return {"uploaded": saved, "failed": failed, "total": len(files), "successful": len(saved)}
+
+
+@router.get("/workspaces/{conversation_id}/preview")
+async def preview_workspace_file(
+    conversation_id: str,
+    path: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    root = workspace_root(conversation_id)
+    target = _safe_workspace_child(conversation_id, path)
+    if not target.exists():
+        raise HTTPException(status_code=404, detail=f"File not found: {path}")
+    if target.is_dir():
+        return {"path": path, "type": "folder", "is_directory": True, "children": _iter_workspace_files(root, path, False)}
+
+    stat = target.stat()
+    mime, _ = mimetypes.guess_type(target.name)
+    ext = target.suffix.lower()
+    preview_type = "text" if (mime or "").startswith("text/") or ext in TEXT_PREVIEW_EXTENSIONS else "binary"
+    if (mime or "").startswith("image/"):
+        preview_type = "image"
+    elif mime == "application/pdf" or ext == ".pdf":
+        preview_type = "pdf"
+    elif ext in {".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx"}:
+        preview_type = "office"
+
+    content = ""
+    encoding = ""
+    truncated = False
+    if preview_type == "text":
+        data = target.read_bytes()
+        truncated = len(data) > MAX_PREVIEW_BYTES
+        content = data[:MAX_PREVIEW_BYTES].decode("utf-8", errors="replace")
+        encoding = "utf-8"
+    elif preview_type == "image" and stat.st_size <= MAX_PREVIEW_BYTES:
+        content = base64.b64encode(target.read_bytes()).decode("ascii")
+        encoding = "base64"
+
+    return {
+        "path": path,
+        "name": target.name,
+        "type": preview_type,
+        "mime_type": mime or "application/octet-stream",
+        "size": stat.st_size,
+        "modified_at": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+        "encoding": encoding,
+        "content": content,
+        "truncated": truncated,
+    }
+
+
 @router.get("/workspaces/{conversation_id}/files/{path:path}")
 async def read_workspace_file(
     conversation_id: str,
@@ -257,10 +407,11 @@ async def read_workspace_file(
     user: User = Depends(get_current_user),
 ):
     """Read a file from the workspace."""
-    manager = get_workspace_manager()
-
     try:
-        content = await manager.read_file(conversation_id, path)
+        target = _safe_workspace_child(conversation_id, path)
+        if not target.is_file():
+            raise FileNotFoundError(path)
+        content = target.read_bytes()
 
         # Try to decode as text
         try:
@@ -288,10 +439,10 @@ async def write_workspace_file(
     user: User = Depends(get_current_user),
 ):
     """Write a file to the workspace."""
-    manager = get_workspace_manager()
-
     try:
-        await manager.write_file_text(conversation_id, request.path, request.content)
+        target = _safe_workspace_child(conversation_id, request.path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(request.content, encoding="utf-8")
 
         logger.info(
             f"File written: {request.path}",
@@ -316,10 +467,11 @@ async def delete_workspace_file(
     user: User = Depends(get_current_user),
 ):
     """Delete a file from the workspace."""
-    manager = get_workspace_manager()
-
     try:
-        await manager.delete_file(conversation_id, path)
+        target = _safe_workspace_child(conversation_id, path)
+        if not target.is_file():
+            raise FileNotFoundError(path)
+        target.unlink()
 
         logger.info(
             f"File deleted: {path}",

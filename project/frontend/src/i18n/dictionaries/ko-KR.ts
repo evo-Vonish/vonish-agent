@@ -3,6 +3,7 @@ import type { I18nDictionary } from "../types";
 const koKR: I18nDictionary = {
   "chat.new": "새 채팅",
   "chat.search": "대화 검색",
+  "chat.rename": "이름 변경",
   "chat.delete": "삭제",
   "chat.deleteConfirm": "이 대화를 삭제할까요? 작업공간 파일도 함께 제거됩니다.",
   "chat.cancel": "취소",
@@ -86,6 +87,22 @@ const koKR: I18nDictionary = {
   "statusbar.collapseHint": "접기",
   "statusbar.more": "더 보기",
 
+  "settings.panel.account": "계정",
+  "settings.panel.profile": "프로필",
+
+  "session.workspace": "작업공간",
+  "session.workspace.noProject": "프로젝트 없음",
+  "session.workspace.addProject": "프로젝트 추가",
+  "session.workspace.searchProjects": "프로젝트 검색…",
+  "session.workspace.warning": "시스템 루트를 Workspace로 사용하지 않는 것이 좋습니다.",
+  "session.permission.audit": "감사 모드",
+  "session.permission.full": "전체 접근",
+  "session.permission.autoReview": "자동 검토",
+  "session.permission.default": "기본 권한",
+  "session.directoryAccess": "디렉토리",
+  "session.directoryAccess.locked": "고정",
+  "session.directoryAccess.external": "외부 접근 허용",
+
   "lang.zh": "中文（简体）",
   "lang.en": "English",
   "lang.ja": "日本語",
@@ -102,6 +119,7 @@ const koKR: I18nDictionary = {
   "toolCategory.python_ops": "Python",
   "toolCategory.web_search": "웹 검색",
   "toolCategory.web_ops": "웹",
+  "toolCategory.research": "Research",
   "toolCategory.shell_ops": "셸",
   "toolCategory.system": "시스템",
 

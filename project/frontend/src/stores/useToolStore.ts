@@ -299,6 +299,8 @@ export const useToolStore = create<ToolState>((set, get) => ({
         isReadOnly: !t.requires_confirmation,
         supportsParallel: true,
         schema: t.schema,
+        riskLevel: (t.risk_level ?? t.risk ?? 'low') as 'low' | 'medium' | 'high',
+        workspaceBound: Boolean(t.workspace_bound),
         useCount: 0,
       }));
       set({ tools: mapped });
@@ -323,19 +325,25 @@ export const useToolStore = create<ToolState>((set, get) => ({
     }
   },
 
-  enableCategory: (category) =>
+  enableCategory: (category) => {
+    const names = get().tools.filter((t) => t.category === category && !t.isEnabled).map((t) => t.name);
     set((state) => ({
       tools: state.tools.map((t) =>
         t.category === category ? { ...t, isEnabled: true } : t
       ),
-    })),
+    }));
+    void Promise.all(names.map((name) => enableTool(name))).catch(() => get().syncFromBackend());
+  },
 
-  disableCategory: (category) =>
+  disableCategory: (category) => {
+    const names = get().tools.filter((t) => t.category === category && t.isEnabled).map((t) => t.name);
     set((state) => ({
       tools: state.tools.map((t) =>
         t.category === category ? { ...t, isEnabled: false } : t
       ),
-    })),
+    }));
+    void Promise.all(names.map((name) => disableTool(name))).catch(() => get().syncFromBackend());
+  },
 
   getEnabledTools: () => get().tools.filter((t) => t.isEnabled),
 

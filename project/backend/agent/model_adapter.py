@@ -279,6 +279,8 @@ class DeepSeekAdapter(ModelAdapter):
 
             if msg.tool_calls:
                 api_msg["tool_calls"] = msg.tool_calls
+                if enable_thinking and msg.role == "assistant":
+                    api_msg["reasoning_content"] = msg.thinking_content or "Tool calls prepared."
             if msg.tool_call_id:
                 api_msg["tool_call_id"] = msg.tool_call_id
 

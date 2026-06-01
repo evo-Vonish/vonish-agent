@@ -13,6 +13,7 @@ const zhCN: I18nDictionary = {
   "chat.exportDo": "导出",
   "chat.exporting": "导出中…",
   "chat.revert": "撤销润色",
+  "chat.rename": "重命名",
   "chat.delete": "删除",
   "chat.deleteConfirm": "确认删除此会话？工作区文件将一同清理。",
   "chat.cancel": "取消",
@@ -98,6 +99,22 @@ const zhCN: I18nDictionary = {
   "statusbar.collapseHint": "收起",
   "statusbar.more": "更多",
 
+  "settings.panel.account": "个人账户",
+  "settings.panel.profile": "个人资料",
+
+  "session.workspace": "工作区",
+  "session.workspace.noProject": "不使用项目",
+  "session.workspace.addProject": "添加新项目",
+  "session.workspace.searchProjects": "搜索项目…",
+  "session.workspace.warning": "不建议将系统盘根目录或系统目录作为 Workspace。",
+  "session.permission.audit": "审核模式",
+  "session.permission.full": "完全访问",
+  "session.permission.autoReview": "自动审查",
+  "session.permission.default": "默认权限",
+  "session.directoryAccess": "目录访问",
+  "session.directoryAccess.locked": "锁定当前工作区",
+  "session.directoryAccess.external": "允许请求越过工作区",
+
   "lang.zh": "中文（简体）",
   "lang.en": "English",
   "lang.ja": "日本語",
@@ -114,6 +131,7 @@ const zhCN: I18nDictionary = {
   "toolCategory.python_ops": "Python",
   "toolCategory.web_search": "网页搜索",
   "toolCategory.web_ops": "网页操作",
+  "toolCategory.research": "研究",
   "toolCategory.shell_ops": "终端",
   "toolCategory.system": "系统",
 

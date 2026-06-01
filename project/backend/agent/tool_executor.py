@@ -108,6 +108,19 @@ class ToolExecutor:
 
         handler = self._handlers.get(request.tool_name)
         tool_def = None
+
+        from api.prompt import get_enabled_tools
+
+        if request.tool_name not in get_enabled_tools():
+            return ToolCallResult(
+                tool_name=request.tool_name,
+                call_id=call_id,
+                success=False,
+                result=None,
+                execution_time_ms=0.0,
+                error_message=f"Tool '{request.tool_name}' is disabled. Enable it in the Tool Management panel.",
+            )
+
         if handler is None:
             from agent.tool_registry import ToolRegistry
 
@@ -116,18 +129,6 @@ class ToolExecutor:
 
             # Try to find a default handler
             handler = self._get_default_handler(request.tool_name)
-
-            # Tool gating: refuse execution if tool is disabled
-            from api.prompt import get_enabled_tools
-            if request.tool_name not in get_enabled_tools():
-                return ToolCallResult(
-                    tool_name=request.tool_name,
-                    call_id=call_id,
-                    success=False,
-                    result=None,
-                    execution_time_ms=0.0,
-                    error_message=f"Tool '{request.tool_name}' is disabled. Enable it in the Tool Management panel.",
-                )
 
             if handler is None:
                 if tool_def is None:
@@ -299,6 +300,10 @@ class ToolExecutor:
             "ipython": self._handle_ipython,
             "web_fetch": self._handle_web_fetch,
             "web_search": self._handle_web_search,
+            "research_search": self._handle_research_search,
+            "research_fetch": self._handle_research_fetch,
+            "deep_research": self._handle_deep_research,
+            "research_status": self._handle_research_status,
             "delete_file": self._handle_delete_file,
             "apply_patch": self._handle_apply_patch,
             "list_directory": self._handle_list_directory,
@@ -516,6 +521,20 @@ class ToolExecutor:
         timeout_ms: int = 20000,
         **_: Any,
     ) -> dict[str, Any]:
+        return await self._handle_research_fetch(
+            url=url,
+            mode=mode,
+            max_chars=20000,
+        )
+
+    async def _handle_legacy_web_fetch(
+        self,
+        url: str,
+        mode: str = "auto",
+        targets: list[str] | None = None,
+        timeout_ms: int = 20000,
+        **_: Any,
+    ) -> dict[str, Any]:
         """Fetch URL using the AGENT ENT Fetch Mini Node.js tool.
 
         Calls the compiled CLI with JSON input and returns structured output.
@@ -627,6 +646,22 @@ class ToolExecutor:
         max_per_url: int = 5000,
         **_: Any,
     ) -> dict[str, Any]:
+        return await self._handle_research_search(
+            query=query,
+            mode="overview",
+            max_results=num_results,
+        )
+
+    async def _handle_legacy_web_search(
+        self,
+        query: str,
+        num_results: int = 5,
+        max_time_ms: int = 15000,
+        max_content_length: int = 8000,
+        per_url_timeout_ms: int = 3000,
+        max_per_url: int = 5000,
+        **_: Any,
+    ) -> dict[str, Any]:
         runner = (
             Path(__file__).resolve().parents[1]
             / "tool_runtimes"
@@ -676,6 +711,75 @@ class ToolExecutor:
             "stats": data.get("stats", {}),
             "source": "web-search_pipeline",
         }
+
+    async def _handle_research_status(self, **_: Any) -> dict[str, Any]:
+        from tools.research_runtime_client import HollowSearchCoreClient, ResearchRuntimeError
+
+        try:
+            health = await HollowSearchCoreClient().ensure_ready()
+            return {"success": True, "status": health}
+        except ResearchRuntimeError as error:
+            return {"success": False, "error": error.to_dict()}
+
+    async def _handle_research_search(
+        self,
+        query: str,
+        mode: str = "overview",
+        max_results: int = 20,
+        language: str = "auto",
+        **_: Any,
+    ) -> dict[str, Any]:
+        from tools.research_runtime_client import HollowSearchCoreClient, ResearchRuntimeError
+
+        try:
+            return await HollowSearchCoreClient().search(
+                query=query,
+                mode=mode,
+                max_results=max_results,
+                language=language,
+            )
+        except ResearchRuntimeError as error:
+            return {"success": False, "error": error.to_dict(), "query": query}
+
+    async def _handle_research_fetch(
+        self,
+        url: str,
+        mode: str = "auto",
+        max_chars: int = 20000,
+        **_: Any,
+    ) -> dict[str, Any]:
+        from tools.research_runtime_client import HollowSearchCoreClient, ResearchRuntimeError
+
+        try:
+            return await HollowSearchCoreClient().fetch(
+                url=url,
+                mode=mode,
+                max_chars=max_chars,
+            )
+        except ResearchRuntimeError as error:
+            return {"success": False, "error": error.to_dict(), "url": url}
+
+    async def _handle_deep_research(
+        self,
+        query: str,
+        mode: str = "deep_dive",
+        max_results: int = 15,
+        max_pages: int = 8,
+        build_evidence: bool = True,
+        **_: Any,
+    ) -> dict[str, Any]:
+        from tools.research_runtime_client import HollowSearchCoreClient, ResearchRuntimeError
+
+        try:
+            return await HollowSearchCoreClient().deep_research(
+                query=query,
+                mode=mode,
+                max_results=max_results,
+                max_pages=max_pages,
+                build_evidence=build_evidence,
+            )
+        except ResearchRuntimeError as error:
+            return {"success": False, "error": error.to_dict(), "query": query}
 
     # ── File Read (with encoding) ──────────────────────────────────────
 

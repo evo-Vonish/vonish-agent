@@ -14,6 +14,7 @@ const CATEGORIES: { value: ToolCategoryType; label: string }[] = [
   { value: 'file_ops', label: 'File Operations' },
   { value: 'workspace', label: 'Workspace' },
   { value: 'web_search', label: 'Web Search' },
+  { value: 'research', label: 'Research' },
   { value: 'system', label: 'System' },
 ];
 

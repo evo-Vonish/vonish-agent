@@ -1,14 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronDown, ChevronUp, Mic, Paperclip, Send, Sparkles, Square } from 'lucide-react';
+import { ChevronDown, ChevronUp, Mic, Plus, Send, Sparkles, Square } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useChatStore } from '@/stores/chatStore';
 import { useI18n } from '@/i18n';
 import { polishText } from '@/services/api';
 import { AttachmentBar } from './AttachmentBar';
-import { ContextButton } from './ContextButton';
+import { ConfigPanel } from './ConfigPanel';
 import { InteractionBar } from './InteractionBar';
-import { ModelSelector } from './ModelSelector';
-import { TodoIndicator } from './TodoIndicator';
+import { SessionOptionsRow } from './SessionOptionsRow';
 
 interface ComposerProps {
   className?: string;
@@ -119,61 +118,9 @@ export function Composer({ className }: ComposerProps) {
   return (
     <div className={cn('flex-shrink-0 border-t border-border bg-surface px-4 py-3', className)}>
       <div className="mx-auto max-w-5xl">
+        {/* Workspace selector — only before conversation starts */}
         <div className="mb-2 flex items-center gap-1">
-          <ModelSelector />
-          <ContextButton />
-          <TodoIndicator />
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept={ACCEPTED_FILES}
-            multiple
-            className="hidden"
-            onChange={handleFilesSelected}
-          />
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isStreaming}
-            className="rounded-md p-1.5 text-foreground-muted transition-colors hover:bg-surface-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-            title="上传文件"
-          >
-            <Paperclip className="h-4 w-4" />
-          </button>
-          <button className="rounded-md p-1.5 text-foreground-muted transition-colors hover:bg-surface-hover hover:text-foreground">
-            <Mic className="h-4 w-4" />
-          </button>
-          {polishing ? (
-            <button className="ml-auto rounded-md p-1.5 text-foreground-muted" disabled title={t('chat.polish')}>
-              <Sparkles className="h-4 w-4 animate-spin" />
-            </button>
-          ) : originalText ? (
-            <button
-              type="button"
-              onClick={handleRevert}
-              className="ml-auto h-7 min-w-7 rounded-md px-2 text-sm font-semibold text-foreground-muted transition-colors hover:bg-surface-hover hover:text-foreground"
-              title={t('chat.revert')}
-              aria-label={t('chat.revert')}
-            >
-              ↩
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={handlePolish}
-              disabled={!text.trim() || isStreaming}
-              className={cn(
-                'ml-auto rounded-md p-1.5 transition-colors',
-                text.trim() && !isStreaming
-                  ? 'text-foreground-muted hover:bg-surface-hover hover:text-foreground'
-                  : 'cursor-not-allowed text-foreground-subtle',
-              )}
-              title={t('chat.polish')}
-              aria-label={t('chat.polish')}
-            >
-              <Sparkles className="h-4 w-4" />
-            </button>
-          )}
+          <SessionOptionsRow />
         </div>
 
         {pendingInteraction && <InteractionBar />}
@@ -193,12 +140,37 @@ export function Composer({ className }: ComposerProps) {
                 className="mb-0 rounded-t-[18px] border border-b-0 border-white/10 bg-[#202020]"
               />
             )}
+
             <div
               className={cn(
                 'relative flex items-end gap-2 border border-white/10 bg-[#202020] px-3 py-2 shadow-[0_8px_30px_rgba(0,0,0,0.18)] transition-all duration-200 focus-within:border-white/[0.18] focus-within:bg-[#242424]',
                 attachments.length > 0 ? 'rounded-b-[18px] rounded-t-none' : 'rounded-[18px]',
               )}
             >
+              {/* ── Left: file + config ── */}
+              <div className="flex items-center gap-0.5 flex-shrink-0 mb-1">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept={ACCEPTED_FILES}
+                  multiple
+                  className="hidden"
+                  onChange={handleFilesSelected}
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isStreaming}
+                  className="rounded-md p-1.5 text-foreground-muted transition-colors hover:bg-white/[0.07] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                  title={t('chat.new')}
+                >
+                  <Plus className="h-4 w-4" />
+                </button>
+
+                <ConfigPanel />
+              </div>
+
+              {/* ── Center: input ── */}
               <textarea
                 ref={textareaRef}
                 value={text}
@@ -215,41 +187,83 @@ export function Composer({ className }: ComposerProps) {
                 style={{ height: 'auto' }}
               />
 
-              {showExpandToggle && (
-                <button
-                  type="button"
-                  onClick={() => setExpanded((value) => !value)}
-                  className="mb-1 flex-shrink-0 rounded-full p-1 text-foreground-muted transition-colors hover:bg-white/[0.07] hover:text-foreground"
-                  title={expanded ? t('chat.collapse') : t('chat.expand')}
-                >
-                  {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                </button>
-              )}
+              {/* ── Right: expand + polish + mic + send ── */}
+              <div className="flex items-center gap-0.5 flex-shrink-0 mb-1">
+                {showExpandToggle && (
+                  <button
+                    type="button"
+                    onClick={() => setExpanded((value) => !value)}
+                    className="rounded-full p-1 text-foreground-muted transition-colors hover:bg-white/[0.07] hover:text-foreground"
+                    title={expanded ? t('chat.collapse') : t('chat.expand')}
+                  >
+                    {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                  </button>
+                )}
 
-              {isStreaming ? (
-                <button
-                  type="button"
-                  onClick={stopGeneration}
-                  className="mb-0.5 flex-shrink-0 rounded-full bg-error p-2 text-white transition-all duration-200 hover:bg-error/80 hover:scale-105"
-                  title={t('chat.stop')}
-                >
-                  <Square className="h-4 w-4" fill="currentColor" />
+                {/* Polish */}
+                {polishing ? (
+                  <button className="rounded-md p-1 text-foreground-muted" disabled title={t('chat.polish')}>
+                    <Sparkles className="h-4 w-4 animate-spin" />
+                  </button>
+                ) : originalText ? (
+                  <button
+                    type="button"
+                    onClick={handleRevert}
+                    className="h-7 min-w-7 rounded-md px-1.5 text-sm font-semibold text-foreground-muted transition-colors hover:bg-white/[0.07] hover:text-foreground"
+                    title={t('chat.revert')}
+                    aria-label={t('chat.revert')}
+                  >
+                    ↩
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handlePolish}
+                    disabled={!text.trim() || isStreaming}
+                    className={cn(
+                      'rounded-md p-1 transition-colors',
+                      text.trim() && !isStreaming
+                        ? 'text-foreground-muted hover:bg-white/[0.07] hover:text-foreground'
+                        : 'cursor-not-allowed text-foreground-subtle',
+                    )}
+                    title={t('chat.polish')}
+                    aria-label={t('chat.polish')}
+                  >
+                    <Sparkles className="h-4 w-4" />
+                  </button>
+                )}
+
+                {/* Voice */}
+                <button className="rounded-md p-1 text-foreground-muted transition-colors hover:bg-white/[0.07] hover:text-foreground">
+                  <Mic className="h-4 w-4" />
                 </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={handleSend}
-                  disabled={!canSend}
-                  className={cn(
-                    'mb-0.5 flex-shrink-0 rounded-full p-2 transition-all duration-200',
-                    canSend
-                      ? 'bg-primary text-white hover:bg-primary-hover hover:scale-105'
-                      : 'cursor-not-allowed bg-white/[0.07] text-foreground-muted',
-                  )}
-                >
-                  <Send className="h-4 w-4" />
-                </button>
-              )}
+
+                {/* Send / Stop */}
+                {isStreaming ? (
+                  <button
+                    type="button"
+                    onClick={stopGeneration}
+                    className="rounded-full bg-error p-1.5 text-white transition-all duration-200 hover:bg-error/80 hover:scale-105"
+                    title={t('chat.stop')}
+                  >
+                    <Square className="h-3.5 w-3.5" fill="currentColor" />
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleSend}
+                    disabled={!canSend}
+                    className={cn(
+                      'rounded-full p-1.5 transition-all duration-200',
+                      canSend
+                        ? 'bg-primary text-white hover:bg-primary-hover hover:scale-105'
+                        : 'cursor-not-allowed bg-white/[0.07] text-foreground-muted',
+                    )}
+                  >
+                    <Send className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="mt-1.5 text-center">

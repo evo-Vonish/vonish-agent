@@ -73,6 +73,18 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Tool registration failed: {e}")
 
+    try:
+        if settings.hollow_search_core_enabled:
+            from tools.research_runtime_client import HollowSearchCoreClient
+
+            health = await HollowSearchCoreClient().ensure_ready()
+            logger.info(
+                "hollow-search-core ready",
+                extra={"version": health.get("version"), "engines": health.get("engines")},
+            )
+    except Exception as e:
+        logger.warning(f"hollow-search-core startup skipped: {e}")
+
     # Clean up orphaned workspace directories (no corresponding DB conversation)
     try:
         from uuid import UUID
@@ -112,6 +124,13 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Agent Backend v2 Shutting Down...")
+
+    try:
+        from tools.research_runtime_client import shutdown_hollow_search_core
+
+        await shutdown_hollow_search_core()
+    except Exception as e:
+        logger.warning(f"hollow-search-core shutdown error: {e}")
 
     try:
         from db.session import close_db

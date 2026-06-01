@@ -1,0 +1,32 @@
+{
+  "name": "hollow-search-core",
+  "version": "1.0.0",
+  "description": "VonishAgent's high-performance research web tool core — search, crawl, purify, evidence pipeline",
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.0.1",
+    "@mozilla/readability": "^0.5.0",
+    "cheerio": "^1.0.0",
+    "fastify": "^5.1.0",
+    "jsdom": "^25.0.1",
+    "lru-cache": "^11.0.0",
+    "p-limit": "^6.1.0",
+    "turndown": "^7.2.0",
+    "undici": "^7.2.0",
+    "yaml": "^2.7.0"
+  },
+  "devDependencies": {
+    "@types/jsdom": "^21.1.7",
+    "@types/node": "^22.10.0",
+    "@types/turndown": "^5.0.5",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
