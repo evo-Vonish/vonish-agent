@@ -134,6 +134,9 @@ class AgentLoop:
         api_base: str | None = None,
         context_profile: str = "balanced",
         system_prompt: str | None = None,
+        workspace_id: str | None = None,
+        permission_mode: str = "default",
+        directory_access_mode: str = "locked_workspace",
     ) -> AsyncGenerator[str, None]:
         """Run the agent loop and yield SSE events.
 
@@ -546,7 +549,12 @@ class AgentLoop:
 
                     # 2. Execute tools (may take time, but frontend already shows spinners)
                     tool_results = await self._execute_native_tool_calls(
-                        conversation_id, context, native_tool_calls
+                        conversation_id,
+                        context,
+                        native_tool_calls,
+                        workspace_id=workspace_id,
+                        permission_mode=permission_mode,
+                        directory_access_mode=directory_access_mode,
                     )
 
                     # 2b. Persist tool calls to database
@@ -573,32 +581,13 @@ class AgentLoop:
                                 "metadata": {
                                     "toolName": result.tool_name,
                                     "toolCallId": result.call_id,
-                                    **({"result": result.result} if result.tool_name in {"git_status", "git_diff", "git_history"} else {}),
+                                    **({"result": result.result} if result.tool_name in {"git_status", "git_diff", "git_history", "set_todo_list"} else {}),
                                 },
                                 "error": result.error_message if not result.success else None,
                             },
                         )
                         if not result.success and segment_stats:
                             segment_stats["errorCount"] += 1
-                            yield sse_event(
-                                "workflow_error",
-                                {
-                                    "segmentId": segment_id,
-                                    "stepId": step_id,
-                                    "errorId": f"err_{uuid.uuid4().hex[:10]}",
-                                    "severity": "error",
-                                    "errorType": "tool_failed",
-                                    "title": "工具执行失败",
-                                    "message": result.error_message or f"{result.tool_name} 执行失败",
-                                    "recoverable": True,
-                                    "actions": [
-                                        {"id": "retry_step", "label": "重试此步骤", "style": "primary"},
-                                        {"id": "skip_step", "label": "跳过并继续", "style": "secondary"},
-                                        {"id": "stop_task", "label": "停止任务", "style": "danger"},
-                                        {"id": "view_details", "label": "查看详情", "style": "secondary"},
-                                    ],
-                                },
-                            )
                         yield sse_event(
                             "tool_result",
                             {
@@ -845,6 +834,9 @@ class AgentLoop:
         conversation_id: str,
         context: "AgentContext",
         native_tool_calls: list[dict],
+        workspace_id: str | None = None,
+        permission_mode: str = "default",
+        directory_access_mode: str = "locked_workspace",
     ) -> list[ToolCallResult]:
         """Execute native DeepSeek-format tool calls.
 
@@ -881,6 +873,9 @@ class AgentLoop:
                 arguments=args,
                 call_id=cid,
                 conversation_id=conversation_id,
+                workspace_id=workspace_id,
+                permission_mode=permission_mode,
+                directory_access_mode=directory_access_mode,
             )
             for cid, name, args in calls_with_args
         ]

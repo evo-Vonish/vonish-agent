@@ -173,6 +173,17 @@ export interface Conversation {
   createdAt: number;
   updatedAt: number;
   messageCount: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ProjectSummary {
+  id: string;
+  name: string;
+  conversationCount: number;
+  updatedAt?: number;
+  workspaceId?: string;
+  workspacePath?: string;
+  directoryPath?: string;
 }
 
 export interface Model {

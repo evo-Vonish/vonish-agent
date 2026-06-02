@@ -1,7 +1,9 @@
-import { AlertTriangle, Copy, RotateCcw } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronRight, Copy, RotateCcw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { WorkflowError } from '@/types';
 import { useChatStore } from '@/stores/chatStore';
+import { ExecutionCollapse } from './ExecutionCollapse';
+import { useExecutionDisclosure } from './useExecutionDisclosure';
 
 interface WorkflowErrorCardProps {
   error: WorkflowError;
@@ -10,7 +12,7 @@ interface WorkflowErrorCardProps {
 }
 
 const defaultContinuePrompt =
-  '继续任务。请基于上一次工作流中断的位置继续执行，先简要说明中断原因和恢复计划，然后继续完成任务。';
+  '继续执行当前任务，从上一次未完成的位置恢复。不要要求用户重复需求，不要重复已经完成的工作，直接继续完成任务。';
 
 function severityLabel(severity: WorkflowError['severity']) {
   if (severity === 'fatal') return '严重错误';
@@ -20,8 +22,16 @@ function severityLabel(severity: WorkflowError['severity']) {
 }
 
 export function WorkflowErrorCard({ error, retryPrompt, className }: WorkflowErrorCardProps) {
-  const sendMessage = useChatStore((state) => state.sendMessage);
+  const resumeWorkflow = useChatStore((state) => state.resumeWorkflow);
   const isStreaming = useChatStore((state) => state.isStreaming);
+  const disclosure = useExecutionDisclosure({
+    id: error.id,
+    status: 'error',
+    defaultCollapsed: true,
+    failedStatuses: ['error'],
+    terminalStatuses: ['error'],
+  });
+  const expanded = disclosure.expanded;
   const detail = [
     error.errorType ? `类型: ${error.errorType}` : '',
     error.stepId ? `步骤: ${error.stepId}` : '',
@@ -30,7 +40,7 @@ export function WorkflowErrorCard({ error, retryPrompt, className }: WorkflowErr
 
   const continueTask = () => {
     if (isStreaming) return;
-    void sendMessage(retryPrompt || defaultContinuePrompt);
+    void resumeWorkflow(retryPrompt || defaultContinuePrompt);
   };
 
   const copyError = () => {
@@ -43,55 +53,67 @@ export function WorkflowErrorCard({ error, retryPrompt, className }: WorkflowErr
   };
 
   return (
-    <div
-      className={cn(
-        'codex-panel-reveal w-full rounded-[14px] border border-error/25 bg-error/10 px-4 py-3 text-error shadow-sm',
-        className,
-      )}
-    >
-      <div className="flex items-start gap-3">
-        <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-error/30 bg-background text-error">
-          <AlertTriangle className="h-4 w-4" />
+    <div className={cn('relative space-y-1.5 pl-9 text-error', className)}>
+      {expanded && <span className="workflow-rail-line workflow-rail-line-short workflow-rail-line-error" />}
+      <span className="workflow-rail-icon workflow-rail-icon-error">
+        <AlertTriangle className="h-4 w-4 text-error" />
+      </span>
+      <button
+        type="button"
+        onClick={() => disclosure.toggle()}
+        className="flex max-w-full items-center gap-2 text-left text-[14px] font-medium text-error transition-colors hover:text-error"
+      >
+        <span className="execution-title min-w-0 truncate" data-motion={disclosure.titleMotion} data-tone="failed" data-kind="tool">
+          {severityLabel(error.severity)}
+          <span className="ml-1 text-foreground-subtle">{error.title}</span>
         </span>
-        <div className="min-w-0 flex-1">
-          <div className="text-sm font-semibold">{severityLabel(error.severity)}</div>
-          <div className="mt-1 text-[15px] font-medium leading-6 text-foreground">{error.title}</div>
-          <div className="mt-1 whitespace-pre-wrap break-words text-sm leading-6 text-error/90">
-            {error.message}
+        {expanded ? (
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
+        ) : (
+          <ChevronRight className="h-3.5 w-3.5 shrink-0 opacity-60" />
+        )}
+      </button>
+      <ExecutionCollapse open={expanded}>
+        <div className="codex-panel-reveal codex-detail-panel relative overflow-hidden rounded-[10px] bg-[#252525] text-[13px] shadow-sm">
+          <div className="border-b border-white/5 px-3 py-1.5 text-sm text-error/80">
+            Workflow Error
           </div>
-          {detail.length > 0 && (
-            <div className="mt-2 space-y-1 rounded-[10px] bg-black/20 px-3 py-2 font-mono text-xs leading-5 text-error/80">
-              {detail.map((line) => (
-                <div key={line}>{line}</div>
-              ))}
+          <div className="max-h-[320px] space-y-2.5 overflow-auto px-3 py-2.5 font-mono text-sm leading-6">
+            <pre className="whitespace-pre-wrap break-words text-error">{error.message}</pre>
+            {detail.length > 0 && (
+              <pre className="whitespace-pre-wrap break-words text-error/75">{detail.join('\n')}</pre>
+            )}
+          </div>
+          <div className="flex flex-wrap justify-between gap-2 px-3 pb-2 text-sm text-error">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-3.5 w-3.5" />
+              <span>{severityLabel(error.severity)}</span>
             </div>
-          )}
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={continueTask}
-              disabled={isStreaming}
-              className={cn(
-                'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors',
-                isStreaming
-                  ? 'cursor-not-allowed bg-white/5 text-foreground-subtle'
-                  : 'bg-error/20 text-error hover:bg-error/30',
-              )}
-            >
-              <RotateCcw className="h-3.5 w-3.5" />
-              继续任务
-            </button>
-            <button
-              type="button"
-              onClick={copyError}
-              className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-error/80 transition-colors hover:bg-error/20 hover:text-error"
-            >
-              <Copy className="h-3.5 w-3.5" />
-              复制错误
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={continueTask}
+                disabled={isStreaming}
+                className={cn(
+                  'inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors',
+                  isStreaming ? 'cursor-not-allowed bg-white/5 text-foreground-subtle' : 'hover:bg-error/10',
+                )}
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                继续任务
+              </button>
+              <button
+                type="button"
+                onClick={copyError}
+                className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-error/80 transition-colors hover:bg-error/10 hover:text-error"
+              >
+                <Copy className="h-3.5 w-3.5" />
+                复制错误
+              </button>
+            </div>
           </div>
         </div>
-      </div>
+      </ExecutionCollapse>
     </div>
   );
 }

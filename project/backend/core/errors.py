@@ -162,14 +162,17 @@ def agent_error_handler(request: Request, exc: AgentError) -> JSONResponse:
 
 
 def general_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """Handle uncaught exceptions."""
+    """Handle uncaught exceptions — include real error info for debugging."""
+    tb_info = traceback.format_exc()
+    logger = __import__("core.logging", fromlist=["get_logger"]).get_logger(__name__)
+    logger.error(f"Uncaught exception: {exc}\n{tb_info}")
     return JSONResponse(
         status_code=500,
         content={
             "error": {
                 "code": "INTERNAL_ERROR",
-                "detail": "An unexpected error occurred",
-                "extra": {"traceback": traceback.format_exc()},
+                "detail": f"{type(exc).__name__}: {exc}",
+                "extra": {"traceback": tb_info[-500:]},
             }
         },
     )

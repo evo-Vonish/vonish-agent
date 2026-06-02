@@ -75,6 +75,30 @@ async def is_git_repo(root: Path) -> bool:
         return False
 
 
+async def ensure_workspace(workspace_id: str, init_git: bool = True) -> dict[str, Any]:
+    root = workspace_root(workspace_id)
+    initialized = False
+    if init_git and not await is_git_repo(root):
+        code, stdout, stderr = await run_git(root, "init", timeout=10.0)
+        initialized = code == 0
+        if code != 0:
+            return {
+                "workspace_id": workspace_id,
+                "root_path": str(root),
+                "exists": root.exists(),
+                "is_git_repo": False,
+                "git_initialized": False,
+                "error": stderr or stdout,
+            }
+    return {
+        "workspace_id": workspace_id,
+        "root_path": str(root),
+        "exists": root.exists(),
+        "is_git_repo": await is_git_repo(root),
+        "git_initialized": initialized,
+    }
+
+
 def _status_bucket(code: str) -> str:
     if "U" in code or code in {"AA", "DD"}:
         return "conflicts"

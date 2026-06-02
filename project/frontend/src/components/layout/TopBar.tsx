@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { PanelLeft, Plus, Settings, MessageSquare } from 'lucide-react';
+import { PanelLeft, Plus, MessageSquare } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
 import { useChatStore } from '@/stores/chatStore';
@@ -63,25 +63,6 @@ export function TopBar({ className }: TopBarProps) {
         </span>
       </div>
 
-      {/* Center - Brand */}
-      <div className="absolute left-1/2 -translate-x-1/2 hidden sm:flex items-center gap-1.5">
-        <div className="w-5 h-5 rounded bg-primary flex items-center justify-center">
-          <span className="text-[10px] font-bold text-white leading-none">V</span>
-        </div>
-        <span className="text-xs font-semibold text-foreground tracking-tight">vonish Agent</span>
-      </div>
-
-      {/* Right section — only settings gear */}
-      <div className="flex items-center gap-1">
-        <Tooltip content="设置">
-          <button
-            onClick={() => useUIStore.getState().toggleRightPanel()}
-            className="p-1.5 rounded-md hover:bg-surface-hover text-foreground-muted hover:text-foreground transition-colors"
-          >
-            <Settings className="w-4 h-4" />
-          </button>
-        </Tooltip>
-      </div>
     </header>
   );
 }

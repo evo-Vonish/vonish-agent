@@ -114,23 +114,23 @@ class CodeValidator:
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     base_module = alias.name.split(".")[0]
-                    if base_module in _BLOCKED_MODULES:
+                    if self.policy.block_subprocess and base_module in _BLOCKED_MODULES:
                         violations.append(f"Blocked import: {alias.name}")
 
             elif isinstance(node, ast.ImportFrom):
                 module = (node.module or "").split(".")[0]
-                if module in _BLOCKED_MODULES:
+                if self.policy.block_subprocess and module in _BLOCKED_MODULES:
                     violations.append(f"Blocked import from: {node.module}")
 
             # Check dangerous calls
             elif isinstance(node, ast.Call):
                 if isinstance(node.func, ast.Name):
-                    if node.func.id in _BLOCKED_CALLS:
+                    if self.policy.block_subprocess and node.func.id in _BLOCKED_CALLS:
                         violations.append(f"Blocked call: {node.func.id}()")
                 elif isinstance(node.func, ast.Attribute):
                     # Check for os.system, subprocess.Popen, etc.
                     call_name = self._get_attribute_chain(node.func)
-                    if call_name in _BLOCKED_MODULES:
+                    if self.policy.block_subprocess and call_name in _BLOCKED_MODULES:
                         violations.append(f"Blocked call: {call_name}()")
 
         # Regex-based checks for pip install patterns
@@ -153,7 +153,7 @@ class CodeValidator:
             r"pty\.\w+\s*\(",
         ]
         for pattern in shell_patterns:
-            if re.search(pattern, code):
+            if self.policy.block_subprocess and re.search(pattern, code):
                 violations.append(f"Shell execution blocked: pattern '{pattern}' detected")
                 break
 
@@ -315,8 +315,9 @@ def get_kernel_startup_scripts(workspace_root: Path, policy: SandboxPolicy) -> l
     Splitting into small chunks avoids executing library issues with large
     code blocks.
     """
-    return [
-        _get_safe_open_script(workspace_root),
-        _get_resource_limit_script(policy),
-        _get_socket_block_script(),
-    ]
+    scripts = [_get_resource_limit_script(policy)]
+    if policy.allowed_output_dirs:
+        scripts.insert(0, _get_safe_open_script(workspace_root))
+    if policy.block_network:
+        scripts.append(_get_socket_block_script())
+    return scripts

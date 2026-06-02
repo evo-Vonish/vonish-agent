@@ -189,7 +189,9 @@ function StepDetails({ step }: { step: ExecutionStep }) {
   const label = stepLabels[kind].panel;
   const subject = primarySubject(step);
   const showCommand = kind === 'command';
-  const output = step.error || step.outputPreview || step.content || '';
+  const output = kind === 'thinking'
+    ? (step.error || step.content || step.outputPreview || '')
+    : (step.error || step.outputPreview || step.content || '');
   const toolResult = step.metadata?.result;
   const metadata = step.metadata
     ? compactJson({ ...step.metadata, result: undefined })
@@ -314,8 +316,10 @@ function GitToolResultView({ toolName, result }: { toolName: string; result: unk
 function StepBlock({ step, last = false }: { step: ExecutionStep; last?: boolean }) {
   const kind = stepKind(step);
   const outputText = String(step.outputPreview || step.content || '').trim();
+  const hasThinkingContent = kind === 'thinking' && Boolean(String(step.content || '').trim());
   const isGenericCompletedThinking =
     kind === 'thinking' &&
+    !hasThinkingContent &&
     step.status !== 'running' &&
     step.status !== 'retrying' &&
     !step.error &&

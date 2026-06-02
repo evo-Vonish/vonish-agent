@@ -36,6 +36,9 @@ class ToolCallRequest(BaseModel):
     arguments: dict[str, Any]
     call_id: str = ""
     conversation_id: str = ""
+    workspace_id: str | None = None
+    permission_mode: str = "default"
+    directory_access_mode: str = "locked_workspace"
 
 
 class ToolCallResult(BaseModel):
@@ -74,6 +77,8 @@ class ToolExecutor:
         self._default_timeout: float = 120.0
         self._ipython_manager: Any | None = None
         self._ipython_tool: Any | None = None
+        self._ipython_managers: dict[str, Any] = {}
+        self._ipython_tools: dict[str, Any] = {}
 
     def register_handler(
         self, tool_name: str, handler: Callable[..., Awaitable[Any]]
@@ -176,6 +181,12 @@ class ToolExecutor:
             # Inject conversation_id if the tool expects it
             if request.conversation_id and "conversation_id" not in arguments:
                 arguments["conversation_id"] = request.conversation_id
+            if request.workspace_id and "workspace_id" not in arguments:
+                arguments["workspace_id"] = request.workspace_id
+            if "permission_mode" not in arguments:
+                arguments["permission_mode"] = request.permission_mode
+            if "directory_access_mode" not in arguments:
+                arguments["directory_access_mode"] = request.directory_access_mode
 
             # Execute with timeout
             result = await asyncio.wait_for(
@@ -319,21 +330,32 @@ class ToolExecutor:
         }
         return default_handlers.get(tool_name)
 
-    def _workspace_dir(self, conversation_id: str = "") -> Path:
+    @staticmethod
+    def _full_access(permission_mode: str = "default", directory_access_mode: str = "locked_workspace") -> bool:
+        return permission_mode == "full_access" and directory_access_mode == "request_external"
+
+    def _workspace_dir(self, conversation_id: str = "", workspace_id: str | None = None) -> Path:
         """Return the conversation workspace directory and ensure it exists."""
-        workspace_id = conversation_id or "default"
-        root = (Path(settings.workspace_root).resolve() / workspace_id).resolve()
+        selected_id = workspace_id or conversation_id or "default"
+        root = (Path(settings.workspace_root).resolve() / selected_id).resolve()
         root.mkdir(parents=True, exist_ok=True)
         return root
 
-    def _tool_context(self, conversation_id: str = "") -> Any:
+    def _tool_context(
+        self,
+        conversation_id: str = "",
+        workspace_id: str | None = None,
+        permission_mode: str = "default",
+        directory_access_mode: str = "locked_workspace",
+    ) -> Any:
         from tools.context import ToolContext
 
-        workspace = self._workspace_dir(conversation_id)
+        workspace = self._workspace_dir(conversation_id, workspace_id)
         return ToolContext(
             conversation_id=conversation_id or "default",
             workspace_root=str(workspace),
             user_id="default",
+            allow_workspace_escape=self._full_access(permission_mode, directory_access_mode),
         )
 
     @staticmethod
@@ -348,6 +370,9 @@ class ToolExecutor:
         self,
         path: str,
         conversation_id: str = "",
+        workspace_id: str | None = None,
+        permission_mode: str = "default",
+        directory_access_mode: str = "locked_workspace",
         start_line: int = 1,
         max_lines: int = 200,
         **_: Any,
@@ -355,7 +380,7 @@ class ToolExecutor:
         from tools.file_tools import ReadFileTool
 
         result = await ReadFileTool().execute(
-            self._tool_context(conversation_id),
+            self._tool_context(conversation_id, workspace_id, permission_mode, directory_access_mode),
             path=path,
             start_line=start_line,
             max_lines=max_lines,
@@ -368,12 +393,15 @@ class ToolExecutor:
         old_string: str = "",
         new_string: str = "",
         conversation_id: str = "",
+        workspace_id: str | None = None,
+        permission_mode: str = "default",
+        directory_access_mode: str = "locked_workspace",
         **_: Any,
     ) -> Any:
         from tools.file_tools import EditFileTool
 
         result = await EditFileTool().execute(
-            self._tool_context(conversation_id),
+            self._tool_context(conversation_id, workspace_id, permission_mode, directory_access_mode),
             path=path,
             old_text=old_string,
             new_text=new_string,
@@ -385,12 +413,17 @@ class ToolExecutor:
         path: str,
         content: str,
         conversation_id: str = "",
+        workspace_id: str | None = None,
+        permission_mode: str = "default",
+        directory_access_mode: str = "locked_workspace",
         **_: Any,
     ) -> dict[str, Any]:
         """Create or overwrite a file in the workspace."""
-        ws = self._workspace_dir(conversation_id)
-        fp = (ws / path).resolve()
-        if not str(fp).startswith(str(ws)):
+        ws = self._workspace_dir(conversation_id, workspace_id)
+        allow_escape = self._full_access(permission_mode, directory_access_mode)
+        raw_path = Path(path)
+        fp = raw_path.resolve() if allow_escape and raw_path.is_absolute() else (ws / raw_path).resolve()
+        if not allow_escape and not str(fp).startswith(str(ws)):
             return {"success": False, "path": path, "error": "Path escape blocked"}
         try:
             fp.parent.mkdir(parents=True, exist_ok=True)
@@ -410,11 +443,16 @@ class ToolExecutor:
         timeout: int = 30,
         cwd: str = "",
         conversation_id: str = "",
+        workspace_id: str | None = None,
+        permission_mode: str = "default",
+        directory_access_mode: str = "locked_workspace",
         **_: Any,
     ) -> dict[str, Any]:
-        workspace = self._workspace_dir(conversation_id)
-        work_dir = (workspace / cwd).resolve() if cwd else workspace
-        if not str(work_dir).startswith(str(workspace)):
+        workspace = self._workspace_dir(conversation_id, workspace_id)
+        allow_escape = self._full_access(permission_mode, directory_access_mode)
+        raw_cwd = Path(cwd) if cwd else workspace
+        work_dir = raw_cwd.resolve() if allow_escape and raw_cwd.is_absolute() else (workspace / raw_cwd).resolve() if cwd else workspace
+        if not allow_escape and not str(work_dir).startswith(str(workspace)):
             return {
                 "success": False,
                 "command": command,
@@ -481,6 +519,9 @@ class ToolExecutor:
         timeout_seconds: int = 30,
         restart: bool = False,
         conversation_id: str = "",
+        workspace_id: str | None = None,
+        permission_mode: str = "default",
+        directory_access_mode: str = "locked_workspace",
         **_: Any,
     ) -> dict[str, Any]:
         from tools.ipython_runtime.ipython_tool import IPythonTool
@@ -489,27 +530,36 @@ class ToolExecutor:
 
         workspace_root = Path(settings.workspace_root).resolve()
         workspace_root.mkdir(parents=True, exist_ok=True)
+        access_key = "full" if self._full_access(permission_mode, directory_access_mode) else "default"
 
-        if self._ipython_tool is None:
-            self._ipython_manager = PythonKernelManager(
+        if access_key not in self._ipython_tools:
+            policy = SandboxPolicy(
+                workspace_root=workspace_root,
+                allowed_output_dirs=() if access_key == "full" else ("outputs", "cache/python", "assets"),
+                block_subprocess=access_key != "full",
+                block_network=access_key != "full",
+                block_pip_install=access_key != "full",
+            )
+            manager = PythonKernelManager(
                 workspaces_root=workspace_root,
-                sandbox_policy=SandboxPolicy(workspace_root=workspace_root),
+                sandbox_policy=policy,
                 idle_timeout_seconds=3600.0,
             )
-            await self._ipython_manager.start()
-            self._ipython_tool = IPythonTool(kernel_manager=self._ipython_manager)
+            await manager.start()
+            self._ipython_managers[access_key] = manager
+            self._ipython_tools[access_key] = IPythonTool(kernel_manager=manager, sandbox_policy=policy)
 
         mode = "reset" if restart else session_mode
         timeout = max(1, min(int(timeout_seconds), int(self._default_timeout) - 5))
-        result = await self._ipython_tool.execute(
-            conversation_id=conversation_id or "default",
+        result = await self._ipython_tools[access_key].execute(
+            conversation_id=workspace_id or conversation_id or "default",
             code=code,
             session_mode=mode,
             session_id=session_id,
             timeout_seconds=timeout,
         )
         payload = result.to_tool_response()
-        payload["cwd"] = str(self._workspace_dir(conversation_id))
+        payload["cwd"] = str(self._workspace_dir(conversation_id, workspace_id))
         payload["session_mode"] = mode
         return payload
 
@@ -521,9 +571,18 @@ class ToolExecutor:
         timeout_ms: int = 20000,
         **_: Any,
     ) -> dict[str, Any]:
+        research_mode = {
+            "static": "fast",
+            "dynamic": "deep",
+            "auto": "auto",
+            "fast": "fast",
+            "balanced": "balanced",
+            "deep": "deep",
+            "ultra": "ultra",
+        }.get(mode, "auto")
         return await self._handle_research_fetch(
             url=url,
-            mode=mode,
+            mode=research_mode,
             max_chars=20000,
         )
 
@@ -790,13 +849,18 @@ class ToolExecutor:
         start_line: int = 1,
         max_lines: int = 500,
         conversation_id: str = "",
+        workspace_id: str | None = None,
+        permission_mode: str = "default",
+        directory_access_mode: str = "locked_workspace",
         **_: Any,
     ) -> Any:
         if encoding == "base64":
             import base64
-            workspace = self._workspace_dir(conversation_id)
-            fp = (workspace / path).resolve()
-            if not str(fp).startswith(str(workspace)):
+            workspace = self._workspace_dir(conversation_id, workspace_id)
+            allow_escape = self._full_access(permission_mode, directory_access_mode)
+            raw_path = Path(path)
+            fp = raw_path.resolve() if allow_escape and raw_path.is_absolute() else (workspace / raw_path).resolve()
+            if not allow_escape and not str(fp).startswith(str(workspace)):
                 return {"success": False, "path": path, "error": "Path escape blocked"}
             if not fp.is_file():
                 return {"success": False, "path": path, "error": "File not found"}
@@ -815,7 +879,8 @@ class ToolExecutor:
 
         # Default: use _handle_read_file
         return await self._handle_read_file(
-            path=path, start_line=start_line, max_lines=max_lines, conversation_id=conversation_id
+            path=path, start_line=start_line, max_lines=max_lines, conversation_id=conversation_id,
+            workspace_id=workspace_id, permission_mode=permission_mode, directory_access_mode=directory_access_mode
         )
 
     # ── Delete File ────────────────────────────────────────────────────
@@ -824,10 +889,13 @@ class ToolExecutor:
         self,
         path: str,
         conversation_id: str = "",
+        workspace_id: str | None = None,
+        permission_mode: str = "default",
+        directory_access_mode: str = "locked_workspace",
         **_: Any,
     ) -> Any:
         from tools.file_tools import DeleteFileTool
-        result = await DeleteFileTool().execute(self._tool_context(conversation_id), path=path)
+        result = await DeleteFileTool().execute(self._tool_context(conversation_id, workspace_id, permission_mode, directory_access_mode), path=path)
         return self._tool_result_payload(result)
 
     # ── Apply Patch ────────────────────────────────────────────────────
@@ -836,10 +904,13 @@ class ToolExecutor:
         self,
         patch: str,
         conversation_id: str = "",
+        workspace_id: str | None = None,
+        permission_mode: str = "default",
+        directory_access_mode: str = "locked_workspace",
         **_: Any,
     ) -> Any:
         from tools.file_tools import ApplyPatchTool
-        result = await ApplyPatchTool().execute(self._tool_context(conversation_id), patch=patch)
+        result = await ApplyPatchTool().execute(self._tool_context(conversation_id, workspace_id, permission_mode, directory_access_mode), patch=patch)
         return self._tool_result_payload(result)
 
     # ── List Directory ─────────────────────────────────────────────────
@@ -849,11 +920,16 @@ class ToolExecutor:
         path: str = "",
         recursive: bool = False,
         conversation_id: str = "",
+        workspace_id: str | None = None,
+        permission_mode: str = "default",
+        directory_access_mode: str = "locked_workspace",
         **_: Any,
     ) -> dict[str, Any]:
-        workspace = self._workspace_dir(conversation_id)
-        target = (workspace / path).resolve() if path else workspace
-        if not str(target).startswith(str(workspace)):
+        workspace = self._workspace_dir(conversation_id, workspace_id)
+        allow_escape = self._full_access(permission_mode, directory_access_mode)
+        raw_path = Path(path) if path else workspace
+        target = raw_path.resolve() if allow_escape and raw_path.is_absolute() else (workspace / raw_path).resolve() if path else workspace
+        if not allow_escape and not str(target).startswith(str(workspace)):
             return {"success": False, "error": "Path escape blocked"}
         if not target.is_dir():
             return {"success": False, "error": f"Not a directory: {path}"}
@@ -890,9 +966,10 @@ class ToolExecutor:
         self,
         include_files: bool = True,
         conversation_id: str = "",
+        workspace_id: str | None = None,
         **_: Any,
     ) -> dict[str, Any]:
-        workspace = self._workspace_dir(conversation_id)
+        workspace = self._workspace_dir(conversation_id, workspace_id)
         files: list[dict] = []
         total_size = 0
         if include_files:
@@ -955,15 +1032,20 @@ class ToolExecutor:
         self,
         paths: list[str],
         conversation_id: str = "",
+        workspace_id: str | None = None,
+        permission_mode: str = "default",
+        directory_access_mode: str = "locked_workspace",
         **_: Any,
     ) -> dict[str, Any]:
-        ws = self._workspace_dir(conversation_id)
+        ws = self._workspace_dir(conversation_id, workspace_id)
+        allow_escape = self._full_access(permission_mode, directory_access_mode)
         created: list[str] = []
         already: list[str] = []
         failed: list[str] = []
         for p in paths:
-            target = (ws / p).resolve()
-            if not str(target).startswith(str(ws.resolve())):
+            raw_path = Path(p)
+            target = raw_path.resolve() if allow_escape and raw_path.is_absolute() else (ws / raw_path).resolve()
+            if not allow_escape and not str(target).startswith(str(ws.resolve())):
                 failed.append(p)
                 continue
             try:

@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils';
 import { useChatStore } from '@/stores/chatStore';
 import { useToolStore } from '@/stores/useToolStore';
 import { useI18n } from '@/i18n';
+import { latestTodoFromMessages } from '@/lib/todo';
 
 export function TodoIndicator({ className }: { className?: string }) {
   const [open, setOpen] = useState(false);
@@ -12,8 +13,7 @@ export function TodoIndicator({ className }: { className?: string }) {
 
   // Collect todo from the latest message that has todo data
   const messages = useChatStore((s) => s.messages);
-  const lastTodoMsg = [...messages].reverse().find((m) => m.todo?.items);
-  const todo = lastTodoMsg?.todo;
+  const todo = latestTodoFromMessages(messages);
 
   const counts = { done: 0, doing: 0, todo: 0, blocked: 0, cancelled: 0 };
   if (todo?.items) {

@@ -30,8 +30,8 @@ _tool_configs: dict[str, bool] = {
     "shell_command": True,
     "ipython": True,
     # Web
-    "web_fetch": False,
-    "web_search": False,
+    "web_fetch": True,
+    "web_search": True,
     "research_search": True,
     "research_fetch": True,
     "deep_research": True,

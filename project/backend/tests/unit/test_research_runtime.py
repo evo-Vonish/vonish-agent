@@ -65,12 +65,12 @@ async def test_research_tool_executor_uses_research_client(monkeypatch):
     assert result.result["results"][0]["title"] == "Result"
 
 
-def test_legacy_web_tools_not_enabled_by_default():
+def test_web_research_tools_enabled_by_default():
     register_default_tools()
     enabled = set(get_enabled_tools())
 
     assert "research_search" in enabled
     assert "research_fetch" in enabled
     assert "deep_research" in enabled
-    assert "web_search" not in enabled
-    assert "web_fetch" not in enabled
+    assert "web_search" in enabled
+    assert "web_fetch" in enabled

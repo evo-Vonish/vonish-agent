@@ -47,10 +47,12 @@ class ToolContext:
         conversation_id: str,
         workspace_root: str,
         user_id: str,
+        allow_workspace_escape: bool = False,
     ) -> None:
         self.conversation_id = conversation_id
         self.workspace_root = Path(workspace_root).resolve()
         self.user_id = user_id
+        self.allow_workspace_escape = allow_workspace_escape
 
     # -- path resolution ----------------------------------------------------
 
@@ -76,6 +78,12 @@ class ToolContext:
         """
         if not raw:
             raise PathEscapeError("Empty path is not allowed", raw)
+
+        if self.allow_workspace_escape:
+            candidate = Path(os.path.normpath(raw))
+            if candidate.is_absolute():
+                return candidate.resolve()
+            return (self.workspace_root / candidate).resolve()
 
         # 1. Null bytes
         if "\x00" in raw:

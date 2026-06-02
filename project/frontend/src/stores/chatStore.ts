@@ -12,12 +12,16 @@ import type {
   UploadedFileMeta,
   WorkflowError,
 } from '@/types';
-import { mockContextProfile, contextProfiles } from '@/services/mockData';
+import { contextProfiles } from '@/services/mockData';
 import {
   createConversation as apiCreateConversation,
+  createProject as apiCreateProject,
+  deleteAllConversations as apiDeleteAllConversations,
   deleteConversation as apiDeleteConversation,
+  deleteProject as apiDeleteProject,
   listConversations,
   listModels,
+  renameProject as apiRenameProject,
   streamChat,
   stopChat,
   getConversationMessages,
@@ -29,12 +33,16 @@ import {
 import { generateId } from '@/lib/utils';
 import { useWorkspaceStore } from './workspaceStore';
 import { useToolStore } from './useToolStore';
+import { useSessionDraftStore } from './sessionDraftStore';
 
 type InteractiveToolType = 'ask_user_question' | 'request_approval';
 
 const MAX_ATTACHMENTS = 10;
 const MAX_ATTACHMENT_SIZE = 20 * 1024 * 1024;
 const MAX_TOTAL_ATTACHMENT_SIZE = 50 * 1024 * 1024;
+const WORKFLOW_AUTO_RESUME_PROMPT =
+  '继续执行当前任务，从上一次未完成的位置恢复。不要要求用户重复需求，不要重复已经完成的工作，直接继续完成任务。';
+const MAX_WORKFLOW_AUTO_RESUMES = 3;
 const ALLOWED_ATTACHMENT_EXTENSIONS = new Set([
   'txt',
   'md',
@@ -70,6 +78,11 @@ interface PendingInteraction {
   plan?: { id: string; title: string; description?: string; risk?: string }[];
 }
 
+interface SendMessageOptions {
+  internalContinue?: boolean;
+  autoResumeDepth?: number;
+}
+
 interface ChatState {
   conversations: Conversation[];
   currentConversationId: string | null;
@@ -92,12 +105,17 @@ interface ChatState {
   setInputText: (text: string) => void;
   addMessage: (msg: Message) => void;
   updateMessage: (id: string, partial: Partial<Message>) => void;
-  sendMessage: (content: string) => Promise<void>;
+  sendMessage: (content: string, options?: SendMessageOptions) => Promise<void>;
+  resumeWorkflow: (prompt?: string) => Promise<void>;
   stopGeneration: () => void;
   respondToInteraction: (choice: string, message?: string) => Promise<void>;
   selectConversation: (id: string) => Promise<void>;
   createConversation: (title?: string) => Promise<string>;
+  createProject: (input: { name: string; directoryPath?: string }) => Promise<string>;
   deleteConversation: (id: string) => Promise<void>;
+  renameProject: (projectId: string, name: string) => Promise<void>;
+  deleteProject: (projectId: string) => Promise<void>;
+  clearAll: () => Promise<void>;
   setSelectedModel: (id: string) => void;
   setContextProfile: (profile: ContextProfile) => void;
   switchContextProfile: (profileId: string) => void;
@@ -129,6 +147,24 @@ const fallbackModels: Model[] = [
     maxTokens: 8192,
     contextWindow: 1_000_000,
     tags: ['thinking'],
+  },
+  {
+    id: 'kimi-k2-6',
+    name: 'Kimi K2.6',
+    provider: 'kimi',
+    description: 'Kimi thinking model',
+    maxTokens: 8192,
+    contextWindow: 256_000,
+    tags: ['thinking', 'vision'],
+  },
+  {
+    id: 'kimi-k2-5',
+    name: 'Kimi K2.5',
+    provider: 'kimi',
+    description: 'Kimi thinking model',
+    maxTokens: 8192,
+    contextWindow: 256_000,
+    tags: ['thinking', 'vision'],
   },
 ];
 
@@ -460,7 +496,7 @@ function createWorkflowErrorSegment(
     type: 'workflow_error',
     error,
     retryPrompt:
-      '继续任务。请基于上一次工作流中断的位置继续执行，先简要说明中断原因和恢复计划，然后继续完成任务。',
+      WORKFLOW_AUTO_RESUME_PROMPT,
   };
 }
 
@@ -577,7 +613,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   messages: [],
   models: fallbackModels,
   selectedModelId: fallbackModels[0].id,
-  contextProfile: mockContextProfile,
+  contextProfile: contextProfiles.find((p) => p.id === 'balanced') ?? contextProfiles[0],
   availableProfiles: contextProfiles,
   contextUsage: null,
   isStreaming: false,
@@ -622,15 +658,34 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // Load actual messages from DB
         try {
           const result = await getConversationMessages(cid);
-          const msgs: Message[] = result.messages.map((m) => ({
-            id: generateId(),
-            role: m.role as 'user' | 'assistant',
-            content: m.content,
-            thinkingContent: m.thinking ?? undefined,
-            type: 'text',
-            timestamp: Date.parse(m.timestamp) || Date.now(),
-            status: 'complete' as const,
-          }));
+          const msgs: Message[] = result.messages.map((m) => {
+            const role = m.role as 'user' | 'assistant';
+            const segments =
+              role === 'assistant'
+                ? normalizeAssistantSegments(m.segments, m.thinking, m.content)
+                : [];
+            const segmentToolCalls = segments
+              .filter((segment): segment is Extract<MessageSegment, { type: 'tool' }> =>
+                segment.type === 'tool',
+              )
+              .map((segment) => segment.tool);
+            const persistedToolCalls = Array.isArray(m.tool_calls)
+              ? m.tool_calls.map((tool) => normalizeToolCall(tool))
+              : [];
+            const toolCalls = segmentToolCalls.length ? segmentToolCalls : persistedToolCalls;
+            return {
+              id: generateId(),
+              role,
+              content: m.content,
+              thinkingContent: m.thinking ?? undefined,
+              segments: segments.length ? segments : undefined,
+              toolCalls: toolCalls.length ? toolCalls : undefined,
+              files: m.files ?? undefined,
+              type: 'text',
+              timestamp: Date.parse(m.timestamp) || Date.now(),
+              status: 'complete' as const,
+            };
+          });
           set({ messages: msgs });
         } catch {
           set({ messages: [] });
@@ -688,9 +743,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       };
     }),
 
-  sendMessage: async (content) => {
+  sendMessage: async (content, options = {}) => {
     if (get().isStreaming) return;
-    const attachmentSnapshot = get().attachments;
+    const internalContinue = Boolean(options.internalContinue);
+    const attachmentSnapshot = internalContinue ? [] : get().attachments;
     const hasAttachments = attachmentSnapshot.length > 0;
     const trimmedContent = content.trim();
     if (!trimmedContent && !hasAttachments) return;
@@ -702,16 +758,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
       );
     }
 
-    const userMsg: Message = {
-      id: generateId(),
-      role: 'user',
-      content: trimmedContent,
-      type: 'text',
-      files: attachmentSnapshot.map(queuedFileMeta),
-      timestamp: Date.now(),
-      status: 'complete',
-    };
-    get().addMessage(userMsg);
+    let userMsg: Message | null = null;
+    if (!internalContinue) {
+      userMsg = {
+        id: generateId(),
+        role: 'user',
+        content: trimmedContent,
+        type: 'text',
+        files: attachmentSnapshot.map(queuedFileMeta),
+        timestamp: Date.now(),
+        status: 'complete',
+      };
+      get().addMessage(userMsg);
+    }
 
     const assistantMsg: Message = {
       id: generateId(),
@@ -727,12 +786,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     const currentMsgId = assistantMsg.id;
     const selectedModelForRequest = get().selectedModelId;
+    const sessionDraft = useSessionDraftStore.getState();
+    const currentConversation = get().conversations.find((conversation) => conversation.id === conversationId);
+    const selectedWorkspaceId = String(
+      currentConversation?.metadata?.workspace_id ||
+      currentConversation?.metadata?.project_id ||
+      conversationId,
+    );
     let activeThinkingSegmentId: string | null = null;
     let activeTextSegmentId: string | null = null;
     let activeExecutionSegmentId: string | null = null;
     let structuredExecutionActive = false;
     let showingFileProcessing = hasAttachments;
     let completedSend = false;
+    let shouldAutoResumeWorkflow = false;
 
     const appendSegment = (segment: MessageSegment) => {
       const current = get().messages.find((m) => m.id === currentMsgId);
@@ -802,6 +869,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     try {
       let uploadedFiles: UploadedFileMeta[] = [];
+      if (selectedWorkspaceId) {
+        await useWorkspaceStore.getState().selectWorkspace(selectedWorkspaceId);
+      }
       if (hasAttachments) {
         set((state) => ({
           attachments: state.attachments.map((attachment) => ({ ...attachment, uploading: true })),
@@ -814,7 +884,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           ...uploadResult.uploaded,
           ...(uploadResult.failed ?? []).map((file) => ({ ...file, status: 'failed' as const })),
         ];
-        get().updateMessage(userMsg.id, { files: uploadedFiles });
+        if (userMsg) get().updateMessage(userMsg.id, { files: uploadedFiles });
         useWorkspaceStore.getState().loadWorkspace(conversationId);
       }
 
@@ -945,6 +1015,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               severity: error.severity,
             });
             set({ apiError: `${error.title}: ${error.message}` });
+            shouldAutoResumeWorkflow = error.recoverable;
             return;
           }
 
@@ -1164,6 +1235,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               ],
             });
             set({ apiError: detail, isStreaming: false });
+            shouldAutoResumeWorkflow = true;
             return;
           }
 
@@ -1208,6 +1280,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
         },
         abort.signal,
+        {
+          internalContinue,
+          workspaceId: selectedWorkspaceId,
+          permissionMode: sessionDraft.permissionMode,
+          directoryAccessMode: sessionDraft.directoryAccessMode,
+        },
       );
 
       const latest = get().messages.find((m) => m.id === currentMsgId);
@@ -1218,7 +1296,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       void get().fetchContextUsage();
       const finalAssistant = get().messages.find((m) => m.id === currentMsgId);
       const turnCount = get().messages.filter((message) => message.role === 'user').length;
-      if (finalAssistant?.status === 'complete' && turnCount > 0 && turnCount <= 2) {
+      if (!internalContinue && finalAssistant?.status === 'complete' && turnCount > 0 && turnCount <= 2) {
         void summarizeConversationTitle(conversationId, selectedModelForRequest)
           .then((title) => {
             if (!title.trim()) return;
@@ -1259,14 +1337,35 @@ export const useChatStore = create<ChatState>((set, get) => ({
           ],
         });
         set({ apiError: detail });
+        shouldAutoResumeWorkflow = true;
       }
     } finally {
       set((state) => ({
         isStreaming: false,
         _abortController: null,
-        attachments: completedSend ? [] : state.attachments.map((attachment) => ({ ...attachment, uploading: false })),
+        attachments: !internalContinue && completedSend ? [] : state.attachments.map((attachment) => ({ ...attachment, uploading: false })),
       }));
+      if (
+        shouldAutoResumeWorkflow &&
+        !abort.signal.aborted &&
+        (options.autoResumeDepth ?? 0) < MAX_WORKFLOW_AUTO_RESUMES
+      ) {
+        window.setTimeout(() => {
+          if (get().isStreaming || get().currentConversationId !== conversationId) return;
+          void get().sendMessage(WORKFLOW_AUTO_RESUME_PROMPT, {
+            internalContinue: true,
+            autoResumeDepth: (options.autoResumeDepth ?? 0) + 1,
+          });
+        }, 250);
+      }
     }
+  },
+
+  resumeWorkflow: async (prompt) => {
+    await get().sendMessage(prompt || WORKFLOW_AUTO_RESUME_PROMPT, {
+      internalContinue: true,
+      autoResumeDepth: 0,
+    });
   },
 
   stopGeneration: () => {
@@ -1365,14 +1464,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
     }
 
-    // Load workspace file tree for this conversation
-    useWorkspaceStore.getState().loadWorkspace(id);
+    // Load workspace file tree for this conversation. Project conversations share project workspace.
+    useWorkspaceStore.getState().loadWorkspace(String(conversation.metadata?.workspace_id || id));
     // Refresh context usage for the selected conversation
     void get().fetchContextUsage();
   },
 
   createConversation: async (title = 'New chat') => {
-    const conversation = await apiCreateConversation(title, get().selectedModelId);
+    const projectId = useSessionDraftStore.getState().workspaceId;
+    const projectConversation = projectId
+      ? get().conversations.find((conversation) => conversation.metadata?.project_id === projectId)
+      : undefined;
+    const projectName = projectId
+      ? projectConversation?.metadata?.project_name || projectId
+      : undefined;
+    const workspaceId = projectId
+      ? projectConversation?.metadata?.workspace_id || projectId
+      : undefined;
+    const metadata = projectId
+      ? { project_id: projectId, project_name: String(projectName), workspace_id: String(workspaceId) }
+      : {};
+    const conversation = await apiCreateConversation(title, get().selectedModelId, metadata);
     set((state) => ({
       conversations: [conversation, ...state.conversations],
       currentConversationId: conversation.id,
@@ -1382,8 +1494,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
       pendingInteraction: null,
     }));
     // Load workspace for the new conversation (will be empty initially)
-    useWorkspaceStore.getState().loadWorkspace(conversation.id);
+    useWorkspaceStore.getState().loadWorkspace(String(conversation.metadata?.workspace_id || conversation.id));
     return conversation.id;
+  },
+
+  createProject: async ({ name, directoryPath }) => {
+    const { project, firstConversation } = await apiCreateProject({
+      name,
+      directoryPath,
+      model: get().selectedModelId,
+      firstConversationTitle: '新对话',
+    });
+    useSessionDraftStore.getState().setWorkspaceId(project.id);
+    set((state) => ({
+      conversations: [firstConversation, ...state.conversations],
+      currentConversationId: firstConversation.id,
+      messages: [],
+      contextUsage: null,
+      apiError: null,
+      pendingInteraction: null,
+    }));
+    useWorkspaceStore.getState().loadWorkspace(project.workspaceId || project.id);
+    void useWorkspaceStore.getState().loadWorkspaceList();
+    return project.id;
   },
 
   deleteConversation: async (id) => {
@@ -1393,7 +1526,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (state.currentConversationId === id) {
         const first = conversations[0];
         const newId = first?.id ?? null;
-        if (newId) useWorkspaceStore.getState().loadWorkspace(newId);
+        if (newId) {
+          const nextConversation = conversations.find((conversation) => conversation.id === newId);
+          useWorkspaceStore.getState().loadWorkspace(String(nextConversation?.metadata?.workspace_id || newId));
+        }
         else useWorkspaceStore.getState().loadWorkspace(null);
         return {
           conversations,
@@ -1403,6 +1539,59 @@ export const useChatStore = create<ChatState>((set, get) => ({
         };
       }
       return { conversations };
+    });
+  },
+
+  renameProject: async (projectId, name) => {
+    const project = await apiRenameProject(projectId, name);
+    set((state) => ({
+      conversations: state.conversations.map((conversation) =>
+        conversation.metadata?.project_id === projectId
+          ? {
+              ...conversation,
+              metadata: {
+                ...(conversation.metadata ?? {}),
+                project_id: projectId,
+                project_name: project.name,
+              },
+            }
+          : conversation,
+      ),
+    }));
+  },
+
+  deleteProject: async (projectId) => {
+    await apiDeleteProject(projectId);
+    set((state) => {
+      const conversations = state.conversations.filter(
+        (conversation) => conversation.metadata?.project_id !== projectId,
+      );
+      const currentStillExists = conversations.some((conversation) => conversation.id === state.currentConversationId);
+      const next = currentStillExists ? state.currentConversationId : null;
+      if (next) {
+        const nextConversation = conversations.find((conversation) => conversation.id === next);
+        useWorkspaceStore.getState().loadWorkspace(String(nextConversation?.metadata?.workspace_id || next));
+      }
+      else useWorkspaceStore.getState().loadWorkspace(null);
+      return {
+        conversations,
+        currentConversationId: next,
+        messages: currentStillExists ? state.messages : [],
+        pendingInteraction: null,
+      };
+    });
+  },
+
+  clearAll: async () => {
+    await apiDeleteAllConversations();
+    useWorkspaceStore.getState().loadWorkspace(null);
+    set({
+      conversations: [],
+      currentConversationId: null,
+      messages: [],
+      contextUsage: null,
+      pendingInteraction: null,
+      apiError: null,
     });
   },
 

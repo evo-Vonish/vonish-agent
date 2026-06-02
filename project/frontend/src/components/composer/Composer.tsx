@@ -116,7 +116,7 @@ export function Composer({ className }: ComposerProps) {
   const showExpandToggle = text.length > 0;
 
   return (
-    <div className={cn('flex-shrink-0 border-t border-border bg-surface px-4 py-3', className)}>
+    <div className={cn('flex-shrink-0 border-t border-white/8 bg-[#111111]/95 px-4 py-3 shadow-[0_-16px_40px_rgba(0,0,0,0.18)]', className)}>
       <div className="mx-auto max-w-5xl">
         {/* Workspace selector — only before conversation starts */}
         <div className="mb-2 flex items-center gap-1">
@@ -143,7 +143,7 @@ export function Composer({ className }: ComposerProps) {
 
             <div
               className={cn(
-                'relative flex items-end gap-2 border border-white/10 bg-[#202020] px-3 py-2 shadow-[0_8px_30px_rgba(0,0,0,0.18)] transition-all duration-200 focus-within:border-white/[0.18] focus-within:bg-[#242424]',
+                'relative flex items-end gap-2 border border-white/10 bg-[#1d1d1d] px-3 py-2 shadow-[0_10px_40px_rgba(0,0,0,0.28)] transition-all duration-200 focus-within:border-white/[0.2] focus-within:bg-[#222222] focus-within:shadow-[0_12px_48px_rgba(0,0,0,0.34)]',
                 attachments.length > 0 ? 'rounded-b-[18px] rounded-t-none' : 'rounded-[18px]',
               )}
             >
@@ -161,7 +161,7 @@ export function Composer({ className }: ComposerProps) {
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={isStreaming}
-                  className="rounded-md p-1.5 text-foreground-muted transition-colors hover:bg-white/[0.07] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-lg p-1.5 text-foreground-muted transition-colors hover:bg-white/[0.08] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
                   title={t('chat.new')}
                 >
                   <Plus className="h-4 w-4" />
@@ -193,7 +193,7 @@ export function Composer({ className }: ComposerProps) {
                   <button
                     type="button"
                     onClick={() => setExpanded((value) => !value)}
-                    className="rounded-full p-1 text-foreground-muted transition-colors hover:bg-white/[0.07] hover:text-foreground"
+                    className="rounded-lg p-1 text-foreground-muted transition-colors hover:bg-white/[0.08] hover:text-foreground"
                     title={expanded ? t('chat.collapse') : t('chat.expand')}
                   >
                     {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
@@ -202,14 +202,14 @@ export function Composer({ className }: ComposerProps) {
 
                 {/* Polish */}
                 {polishing ? (
-                  <button className="rounded-md p-1 text-foreground-muted" disabled title={t('chat.polish')}>
+                  <button className="rounded-lg p-1 text-foreground-muted" disabled title={t('chat.polish')}>
                     <Sparkles className="h-4 w-4 animate-spin" />
                   </button>
                 ) : originalText ? (
                   <button
                     type="button"
                     onClick={handleRevert}
-                    className="h-7 min-w-7 rounded-md px-1.5 text-sm font-semibold text-foreground-muted transition-colors hover:bg-white/[0.07] hover:text-foreground"
+                    className="h-7 min-w-7 rounded-lg px-1.5 text-sm font-semibold text-foreground-muted transition-colors hover:bg-white/[0.08] hover:text-foreground"
                     title={t('chat.revert')}
                     aria-label={t('chat.revert')}
                   >
@@ -223,7 +223,7 @@ export function Composer({ className }: ComposerProps) {
                     className={cn(
                       'rounded-md p-1 transition-colors',
                       text.trim() && !isStreaming
-                        ? 'text-foreground-muted hover:bg-white/[0.07] hover:text-foreground'
+                        ? 'text-foreground-muted hover:bg-white/[0.08] hover:text-foreground'
                         : 'cursor-not-allowed text-foreground-subtle',
                     )}
                     title={t('chat.polish')}
@@ -234,7 +234,7 @@ export function Composer({ className }: ComposerProps) {
                 )}
 
                 {/* Voice */}
-                <button className="rounded-md p-1 text-foreground-muted transition-colors hover:bg-white/[0.07] hover:text-foreground">
+                <button className="rounded-lg p-1 text-foreground-muted transition-colors hover:bg-white/[0.08] hover:text-foreground">
                   <Mic className="h-4 w-4" />
                 </button>
 
@@ -243,7 +243,7 @@ export function Composer({ className }: ComposerProps) {
                   <button
                     type="button"
                     onClick={stopGeneration}
-                    className="rounded-full bg-error p-1.5 text-white transition-all duration-200 hover:bg-error/80 hover:scale-105"
+                    className="rounded-xl bg-error p-1.5 text-white transition-all duration-200 hover:bg-error/80 hover:scale-105"
                     title={t('chat.stop')}
                   >
                     <Square className="h-3.5 w-3.5" fill="currentColor" />
@@ -254,7 +254,7 @@ export function Composer({ className }: ComposerProps) {
                     onClick={handleSend}
                     disabled={!canSend}
                     className={cn(
-                      'rounded-full p-1.5 transition-all duration-200',
+                      'rounded-xl p-1.5 transition-all duration-200',
                       canSend
                         ? 'bg-primary text-white hover:bg-primary-hover hover:scale-105'
                         : 'cursor-not-allowed bg-white/[0.07] text-foreground-muted',

@@ -66,7 +66,7 @@ const mockTools: ToolDefinition[] = [
     category: 'file_ops',
     capabilities: ['writes_files'],
     approvalLevel: 'suggest',
-    isEnabled: false,
+    isEnabled: true,
     isReadOnly: false,
     supportsParallel: false,
     schema: {
@@ -192,7 +192,7 @@ const mockTools: ToolDefinition[] = [
     category: 'web_search',
     capabilities: ['read_only', 'requires_approval'],
     approvalLevel: 'auto',
-    isEnabled: false,
+    isEnabled: true,
     isReadOnly: true,
     supportsParallel: true,
     schema: {
@@ -213,7 +213,7 @@ const mockTools: ToolDefinition[] = [
     category: 'system',
     capabilities: ['writes_files', 'requires_approval'],
     approvalLevel: 'required',
-    isEnabled: false,
+    isEnabled: true,
     isReadOnly: false,
     supportsParallel: false,
     schema: {

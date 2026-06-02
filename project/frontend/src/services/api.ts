@@ -5,6 +5,7 @@ import type {
   GitStatus,
   MessageSegment,
   Model,
+  ProjectSummary,
   ToolCall,
   UploadedFileMeta,
   WorkspaceFilePreview,
@@ -18,6 +19,18 @@ interface BackendConversation {
   created_at: string;
   updated_at: string;
   message_count: number;
+  metadata?: Record<string, unknown>;
+}
+
+interface BackendProject {
+  id: string;
+  name: string;
+  conversation_count: number;
+  updated_at?: string;
+  workspace_id?: string;
+  workspace_path?: string;
+  directory_path?: string;
+  first_conversation?: BackendConversation;
 }
 
 interface BackendModel {
@@ -83,6 +96,31 @@ function modelDescription(model: BackendModel): string {
   return `${model.provider}${features.length ? ` · ${features.join(' · ')}` : ''}`;
 }
 
+function toConversation(conversation: BackendConversation): Conversation {
+  return {
+    id: conversation.id,
+    title: conversation.title,
+    messages: [],
+    model: conversation.model,
+    createdAt: toTimestamp(conversation.created_at),
+    updatedAt: toTimestamp(conversation.updated_at),
+    messageCount: conversation.message_count,
+    metadata: conversation.metadata ?? {},
+  };
+}
+
+function toProject(project: BackendProject): ProjectSummary {
+  return {
+    id: project.id,
+    name: project.name,
+    conversationCount: project.conversation_count,
+    updatedAt: project.updated_at ? toTimestamp(project.updated_at) : undefined,
+    workspaceId: project.workspace_id,
+    workspacePath: project.workspace_path,
+    directoryPath: project.directory_path,
+  };
+}
+
 function normalizeUploadedFile(raw: any): UploadedFileMeta {
   const originalName = String(raw.originalName ?? raw.file_name ?? raw.fileName ?? 'unknown');
   const ext = String(raw.ext ?? (originalName.includes('.') ? originalName.split('.').pop() : '') ?? '').toLowerCase();
@@ -134,15 +172,7 @@ export async function listConversations(): Promise<Conversation[]> {
   const body = (await response.json()) as {
     conversations: BackendConversation[];
   };
-  return body.conversations.map((conversation) => ({
-    id: conversation.id,
-    title: conversation.title,
-    messages: [],
-    model: conversation.model,
-    createdAt: toTimestamp(conversation.created_at),
-    updatedAt: toTimestamp(conversation.updated_at),
-    messageCount: conversation.message_count,
-  }));
+  return body.conversations.map(toConversation);
 }
 
 export interface SearchMatch {
@@ -170,6 +200,7 @@ export async function searchConversations(
 export async function createConversation(
   title: string,
   model: string,
+  metadata: Record<string, unknown> = {},
 ): Promise<Conversation> {
   const response = await fetch('/api/conversations', {
     method: 'POST',
@@ -178,21 +209,14 @@ export async function createConversation(
       title,
       model,
       context_profile: 'balanced',
+      metadata,
     }),
   });
   if (!response.ok) {
     throw new Error(`Failed to create conversation: HTTP ${response.status}`);
   }
   const conversation = (await response.json()) as BackendConversation;
-  return {
-    id: conversation.id,
-    title: conversation.title,
-    messages: [],
-    model: conversation.model,
-    createdAt: toTimestamp(conversation.created_at),
-    updatedAt: toTimestamp(conversation.updated_at),
-    messageCount: conversation.message_count,
-  };
+  return toConversation(conversation);
 }
 
 export async function deleteConversation(id: string): Promise<void> {
@@ -200,6 +224,102 @@ export async function deleteConversation(id: string): Promise<void> {
   if (!response.ok && response.status !== 404) {
     throw new Error(`Failed to delete conversation: HTTP ${response.status}`);
   }
+}
+
+export async function listProjects(): Promise<ProjectSummary[]> {
+  const response = await fetch('/api/projects');
+  if (!response.ok) throw new Error(`Failed to load projects: HTTP ${response.status}`);
+  const body = (await response.json()) as BackendProject[];
+  return body.map(toProject);
+}
+
+export async function createProject(input: {
+  name: string;
+  directoryPath?: string;
+  model: string;
+  firstConversationTitle?: string;
+}): Promise<{ project: ProjectSummary; firstConversation: Conversation }> {
+  const response = await fetch('/api/projects', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: input.name,
+      directory_path: input.directoryPath || undefined,
+      model: input.model,
+      first_conversation_title: input.firstConversationTitle || '新对话',
+    }),
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new Error(detail || `Failed to create project: HTTP ${response.status}`);
+  }
+  const body = (await response.json()) as BackendProject;
+  if (!body.first_conversation) throw new Error('Project created without first conversation.');
+  return {
+    project: toProject(body),
+    firstConversation: toConversation(body.first_conversation),
+  };
+}
+
+export async function renameProject(projectId: string, name: string): Promise<ProjectSummary> {
+  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  if (!response.ok) throw new Error(`Failed to rename project: HTTP ${response.status}`);
+  return toProject((await response.json()) as BackendProject);
+}
+
+export async function deleteProject(projectId: string): Promise<void> {
+  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}`, { method: 'DELETE' });
+  if (!response.ok && response.status !== 404) throw new Error(`Failed to delete project: HTTP ${response.status}`);
+}
+
+export async function deleteAllConversations(): Promise<void> {
+  const response = await fetch('/api/conversations-all', { method: 'DELETE' });
+  if (!response.ok) throw new Error(`Failed to clear conversations: HTTP ${response.status}`);
+}
+
+export interface ExportConversationOptions {
+  format: 'md' | 'html' | 'txt';
+  anonymize: boolean;
+  includeBasicInfo: boolean;
+  includeModelName: boolean;
+  modelNameMode: 'actual' | 'generic' | 'custom' | 'hidden';
+  customModelName?: string;
+  includeUserMessages: boolean;
+  includeAssistantMessages: boolean;
+  includeFinalText: boolean;
+  includeThinking: boolean;
+  includeExecution: boolean;
+  includeToolCalls: boolean;
+  includeToolPayload: boolean;
+  includeToolResult: boolean;
+  includeToolErrors: boolean;
+  includeAttachments: boolean;
+  includeWorkspace: boolean;
+  includeSystemEvents: boolean;
+  customTitle?: string;
+}
+
+export async function exportConversation(
+  conversationId: string,
+  options: ExportConversationOptions,
+): Promise<{ blob: Blob; filename: string }> {
+  const response = await fetch(`/api/conversations/${conversationId}/export`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(options),
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new Error(detail || `Export failed: HTTP ${response.status}`);
+  }
+  const blob = await response.blob();
+  const disposition = response.headers.get('Content-Disposition') || '';
+  const filename = disposition.match(/filename="(.+)"/)?.[1] || `conversation.${options.format}`;
+  return { blob, filename };
 }
 
 export async function summarizeConversationTitle(
@@ -444,6 +564,12 @@ export async function streamChat(
   resources: UploadedFileMeta[],
   onEvent: (event: StreamEvent) => void,
   signal?: AbortSignal,
+  options?: {
+    internalContinue?: boolean;
+    workspaceId?: string | null;
+    permissionMode?: string;
+    directoryAccessMode?: string;
+  },
 ): Promise<void> {
   const response = await fetch(`/api/chat/${conversationId}/stream`, {
     method: 'POST',
@@ -453,6 +579,10 @@ export async function streamChat(
       model,
       context_profile: contextProfile,
       enable_thinking: true,
+      internal_continue: Boolean(options?.internalContinue),
+      workspace_id: options?.workspaceId || null,
+      permission_mode: options?.permissionMode || 'default',
+      directory_access_mode: options?.directoryAccessMode || 'locked_workspace',
       resources: resources.map((file) => ({
         uri: file.resourceUri,
         mime_type: file.mimeType,
@@ -526,6 +656,17 @@ export async function streamChat(
     const parsed = parseSseChunk(buffer);
     if (parsed) onEvent(parsed);
   }
+}
+
+export async function ensureWorkspace(
+  workspaceId: string,
+  initGit = true,
+): Promise<{ workspace_id: string; root_path: string; exists: boolean; is_git_repo: boolean; git_initialized?: boolean; error?: string }> {
+  const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/ensure?init_git=${initGit ? 'true' : 'false'}`, {
+    method: 'POST',
+  });
+  if (!response.ok) throw new Error(`Failed to ensure workspace: HTTP ${response.status}`);
+  return (await response.json()) as { workspace_id: string; root_path: string; exists: boolean; is_git_repo: boolean; git_initialized?: boolean; error?: string };
 }
 
 function toApiConfig(config: BackendApiConfig): ApiConfig {

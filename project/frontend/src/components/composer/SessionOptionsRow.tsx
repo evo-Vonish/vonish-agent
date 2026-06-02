@@ -4,6 +4,8 @@ import { cn } from '@/lib/utils';
 import { useI18n } from '@/i18n';
 import { useSessionDraftStore } from '@/stores/sessionDraftStore';
 import { useChatStore } from '@/stores/chatStore';
+import { listProjects } from '@/services/api';
+import type { ProjectSummary } from '@/types';
 
 const BG = '#252423';
 const BORDER = '1px solid rgba(255,255,255,0.07)';
@@ -16,8 +18,6 @@ const ACTIVE = 'rgba(255,255,255,0.04)';
 const DIV = 'rgba(255,255,255,0.06)';
 const BLUE = '#4a90d9';
 
-const MOCK_PROJECTS = ['VonishAgent', 'HOLLOW', 'VonishOCR', 'sctach 3D'];
-
 // ═══════════════════════════════════════════
 //  Workspace Selector – only shown before conversation starts
 // ═══════════════════════════════════════════
@@ -25,6 +25,7 @@ export function SessionOptionsRow() {
   const { t } = useI18n();
   const { workspaceId, setWorkspaceId } = useSessionDraftStore();
   const messages = useChatStore((s) => s.messages);
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -44,10 +45,25 @@ export function SessionOptionsRow() {
     };
   }, [open]);
 
+  useEffect(() => {
+    void listProjects().then(setProjects).catch(() => setProjects([]));
+  }, []);
+
   // Hide when conversation has started
   if (messages.length > 0) return null;
 
-  const label = workspaceId ?? t('session.workspace.noProject');
+  const selected = projects.find((item) => item.id === workspaceId);
+  const label = selected?.name ?? workspaceId ?? t('session.workspace.noProject');
+
+  const addProject = async () => {
+    const name = window.prompt(t('session.workspace.addProject'));
+    const trimmed = name?.trim();
+    if (!trimmed) return;
+    const id = trimmed;
+    setWorkspaceId(id);
+    setProjects((items) => [{ id, name: trimmed, conversationCount: 0 }, ...items]);
+    setOpen(false);
+  };
 
   return (
     <div className="relative">
@@ -77,17 +93,18 @@ export function SessionOptionsRow() {
             {t('session.workspace.searchProjects')}
           </div>
 
-          {MOCK_PROJECTS.map((name) => {
-            const active = workspaceId === name;
+          {projects.map((project) => {
+            const active = workspaceId === project.id;
             return (
-              <button key={name}
-                onClick={() => { setWorkspaceId(name); setOpen(false); }}
+              <button key={project.id}
+                onClick={() => { setWorkspaceId(project.id); setOpen(false); }}
                 className="w-full flex items-center gap-2.5 px-3 h-[36px] rounded-[9px] text-[13px] cursor-pointer text-left transition-colors"
                 style={{ color: active ? T1 : T2, background: active ? ACTIVE : 'transparent' }}
                 onMouseEnter={(e) => { e.currentTarget.style.background = HOVER; e.currentTarget.style.color = T1; }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = active ? ACTIVE : 'transparent'; e.currentTarget.style.color = active ? T1 : T2; }}
               >
-                <span className="flex-1">{name}</span>
+                <span className="flex-1 truncate">{project.name || project.id}</span>
+                <span className="text-[10px]" style={{ color: TM }}>{project.conversationCount}</span>
                 {active && <Check className="w-3.5 h-3.5 flex-shrink-0" style={{ color: BLUE }} />}
               </button>
             );
@@ -96,7 +113,7 @@ export function SessionOptionsRow() {
           <div className="mx-3 my-1 border-t" style={{ borderColor: DIV }} />
 
           <button
-            onClick={() => { /* TODO */ setOpen(false); }}
+            onClick={() => { void addProject(); }}
             className="w-full flex items-center gap-2.5 px-3 h-[36px] rounded-[9px] text-[13px] cursor-pointer transition-colors"
             style={{ color: T2, background: 'transparent' }}
             onMouseEnter={(e) => { e.currentTarget.style.background = HOVER; e.currentTarget.style.color = T1; }}

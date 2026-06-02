@@ -28,7 +28,7 @@ from core.config import settings
 from core.logging import get_logger
 from db.models import Conversation
 from db.session import get_db
-from services.git_service import git_diff, git_history, git_status, workspace_root
+from services.git_service import ensure_workspace, git_diff, git_history, git_status, workspace_root
 from workspace.workspace_manager import WorkspaceManager
 
 logger = get_logger(__name__)
@@ -191,6 +191,8 @@ async def list_workspaces(
     for child in root.iterdir():
         if not child.is_dir() or child.name in seen:
             continue
+        if child.name.startswith(".") or child.name in {"__pycache__", "cache", "tmp", "temp"}:
+            continue
         conv = by_id.get(child.name)
         items.append(
             await _workspace_summary(
@@ -201,6 +203,17 @@ async def list_workspaces(
         )
 
     return {"workspaces": sorted(items, key=lambda item: item["name"].lower()), "total": len(items)}
+
+
+@router.post("/workspaces/{conversation_id}/ensure")
+async def ensure_workspace_route(
+    conversation_id: str,
+    init_git: bool = True,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    result = await ensure_workspace(conversation_id, init_git=init_git)
+    return result
 
 
 @router.get("/workspaces/{conversation_id}/files")

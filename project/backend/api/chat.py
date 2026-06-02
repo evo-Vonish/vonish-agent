@@ -38,6 +38,13 @@ class ChatStreamRequest(BaseModel):
     model: str = Field(default="deepseek-v4-pro", description="Model to use")
     context_profile: str = Field(default="balanced", description="Context profile to use")
     enable_thinking: bool = Field(default=True, description="Enable thinking/reasoning")
+    internal_continue: bool = Field(
+        default=False,
+        description="Run a hidden recovery turn without storing a user message.",
+    )
+    workspace_id: str | None = Field(default=None, description="Selected workspace/project id")
+    permission_mode: str = Field(default="default", description="default / auto_review / full_access")
+    directory_access_mode: str = Field(default="locked_workspace", description="locked_workspace / request_external")
     resources: list[dict[str, Any]] = Field(
         default_factory=list, description="Attached resource references"
     )
@@ -121,14 +128,15 @@ async def chat_stream(
     if resource_refs:
         user_content.append({"type": "files", "files": resource_refs})
 
-    user_msg = MessageModel(
-        conversation_id=conv_uuid,
-        role="user",
-        content=user_content,
-        model=request.model,
-    )
-    db.add(user_msg)
-    await db.commit()
+    if not request.internal_continue:
+        user_msg = MessageModel(
+            conversation_id=conv_uuid,
+            role="user",
+            content=user_content,
+            model=request.model,
+        )
+        db.add(user_msg)
+        await db.commit()
 
     # Collect assistant response from SSE events
     assistant_parts: list[str] = []
@@ -466,7 +474,7 @@ async def chat_stream(
         segment["errorCount"] = max(int(segment.get("errorCount") or 0), len(segment.get("errors", [])))
         segment.setdefault("steps", []).append(
             {
-                "id": f"error-step-{error_id}",
+                "id": f"error-step-{error['id']}",
                 "segmentId": str(segment.get("id") or ""),
                 "type": "error_notice",
                 "status": "failed",
@@ -486,7 +494,7 @@ async def chat_stream(
                 "id": f"workflow-error-{error['id']}",
                 "type": "workflow_error",
                 "error": error,
-                "retryPrompt": "继续任务。请基于上一次工作流中断的位置继续执行，先简要说明中断原因和恢复计划，然后继续完成任务。",
+                "retryPrompt": "继续执行当前任务，从上一次未完成的位置恢复。不要要求用户重复需求，不要重复已经完成的工作，直接继续完成任务。",
             }
         )
 
@@ -506,6 +514,9 @@ async def chat_stream(
                     api_base=api_config.api_base if api_config else None,
                     context_profile=request.context_profile,
                     resources=resource_refs,
+                    workspace_id=request.workspace_id,
+                    permission_mode=request.permission_mode,
+                    directory_access_mode=request.directory_access_mode,
                 ):
                     await queue.put(produced)
             except Exception as exc:

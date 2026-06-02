@@ -14,7 +14,7 @@ const PHRASES = [
 ];
 
 const TYPE_SPEED = 80;   // ms per char
-const PAUSE = 1800;       // ms pause after full phrase
+const PAUSE = 3500;       // ms pause after full phrase
 const DELETE_SPEED = 40;  // ms per char delete
 
 function useTypewriterCycle() {
@@ -51,7 +51,8 @@ function useTypewriterCycle() {
         if (charIdx.current <= 0) {
           deleting.current = false;
           phraseIdx.current++;
-          paused.current = true;
+          charIdx.current = 0;
+          // resume typing immediately – don't enter paused/delete loop
           timer = setTimeout(tick, TYPE_SPEED * 3);
           return;
         }

@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { FileNode, GitStatus, WorkspaceSummary } from '@/types';
 import {
   getWorkspaceGitStatus,
+  ensureWorkspace,
   listWorkspaceFiles,
   listWorkspaces,
   openWorkspace,
@@ -108,6 +109,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
     set({ conversationId, activeWorkspaceId: conversationId, loading: true });
 
     try {
+      await ensureWorkspace(conversationId);
       const [files, git] = await Promise.all([
         listWorkspaceFiles(conversationId),
         getWorkspaceGitStatus(conversationId).catch(() => null),
@@ -131,6 +133,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   selectWorkspace: async (workspaceId) => {
     set({ activeWorkspaceId: workspaceId, loading: true });
     try {
+      await ensureWorkspace(workspaceId);
       const [files, git] = await Promise.all([
         listWorkspaceFiles(workspaceId),
         getWorkspaceGitStatus(workspaceId).catch(() => null),
