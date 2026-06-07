@@ -1,0 +1,140 @@
+# PPTX Procedure Graph — 可执行步骤图
+
+procedure:
+  name: "pptx_creation"
+  description: "从Artifact Plan生成PPTX演示文稿的完整流程"
+  
+  entry:
+    condition: "用户请求创建PPT"
+    routing:
+      - if: "用户上传了参考PPT"
+        path: "REFERENCE_MODE"
+      - if: "用户提供了明确模板"
+        path: "TEMPLATE_MODE"
+      - else:
+        path: "CREATIVE_MODE"  # 默认
+  
+  # === 创意模式（默认）===
+  steps_creative:
+    - id: "S1"
+      name: "读取Artifact Plan"
+      action: "read_artifact_plan"
+      recall_checkpoint: "CP1"
+      outputs: ["sections_for_pptx", "visual_tokens", "audience"]
+      
+    - id: "S2"
+      name: "读取Design Tokens"
+      action: "read_file"
+      target: "design_tokens.yaml"
+      outputs: ["palette", "layout_patterns", "fonts", "density"]
+      
+    - id: "S3"
+      name: "选择Profile"
+      action: "select_profile"
+      based_on: ["audience", "topic", "purpose"]
+      outputs: ["selected_profile"]
+      
+    - id: "S4"
+      name: "创建Outline"
+      action: "write_outline"
+      tool: "write_file"
+      format: ".pptd"
+      rules:
+        - "每页一个section [P1]"
+        - "包含封面、目录、内容、结尾 [P1]"
+        - "一页一个核心信息 [P2]"
+      outputs: ["outline.md"]
+      
+    - id: "S5"
+      name: "创建Design"
+      action: "write_design"
+      tool: "write_file"
+      format: "design.md"
+      recall_checkpoint: "CP2"
+      rules:
+        - "参考selected_profile配色 [P1]"
+        - "正文字号≥18px [P0]"
+        - "定义完整theme [P1]"
+      outputs: ["design.md"]
+      
+    - id: "S6"
+      name: "生成.page文件"
+      action: "generate_pages"
+      tool: "write_file"
+      parallel: true  # 可以并行生成多个.page
+      rules:
+        - "每个section一个.page文件 [P1]"
+        - "使用design.md中定义的theme [P1]"
+        - "选择合适layout_pattern [P2]"
+        - "3-6个高亮数据点每页 [P2]"
+        - "正文≤40-50汉字 [P2]"
+      outputs: ["pages/*.page"]
+      
+    - id: "S7"
+      name: "创建.pptd文件"
+      action: "create_pptd"
+      tool: "write_file"
+      inputs: ["outline", "design", "pages"]
+      outputs: ["presentation.pptd"]
+      
+    - id: "S8"
+      name: "运行检查器"
+      action: "run_checker"
+      tool: "shell"
+      command: "scripts/check.sh presentation.pptd"
+      validation_gate: "VG_CHECKER"
+      
+    - id: "S9"
+      name: "修复问题"
+      action: "auto_fix"
+      condition: "checker报告warnings"
+      rules:
+        - "TextOverflow → 缩减文本或增大bounds [P0]"
+        - "TextOcclusion → 调整z-order [P0]"
+        - "TextDrift → 对齐bounds [P2]"
+        - "TextUnderfill → 减小bounds [P3]"
+      
+    - id: "S10"
+      name: "视觉验收"
+      action: "visual_review"
+      recall_checkpoint: "CP5"
+      rules:
+        - "check.sh: 0 errors 0 warnings [P0]"
+        - "无AI典型配色 [必须]"
+        - "封面有第一眼震撼 [必须]"
+        - "标题与正文字号差异显著 [必须]"
+      outputs: ["visual_review_passed"]
+      
+    - id: "S11"
+      name: "交付"
+      action: "deliver"
+      condition: "VG_CHECKER PASSED AND visual_review_passed"
+      note: "交付整个目录（.pptd + pages/ + images/），不单独移动.pptd"
+      outputs: ["presentation directory"]
+
+  # === 参考模式 ===
+  steps_reference:
+    - id: "R1"
+      name: "截图参考PPT"
+      action: "screenshot"
+      tool: "scripts/screenshot.sh"
+      
+    - id: "R2"
+      name: "分析视觉风格"
+      action: "analyze_style"
+      
+    - id: "R3"
+      name: "复刻设计"
+      action: "replicate"
+      continue_from: "S4"  # 回到outline步骤
+
+# === 验证门 ===
+validation_gates:
+  VG_CHECKER:
+    name: "PPTD检查器"
+    description: "格式验证+溢出/遮挡/漂移检测"
+    checks:
+      - "0 errors"
+      - "0 warnings（或所有warnings已解释）"
+    must_pass_P0: true
+    policy: "有errors不交付"

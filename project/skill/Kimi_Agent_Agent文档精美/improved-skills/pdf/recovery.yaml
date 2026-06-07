@@ -1,0 +1,49 @@
+# PDF Recovery Playbook
+
+recovery:
+  P0:
+    - error: "CSS Counter导致编号异常"
+      validator: "V0_1"
+      fix:
+        - "搜索所有counter-reset/counter-increment"
+        - "替换为data-*属性+显式数字"
+        - "重新生成PDF"
+        
+    - error: "Mermaid图表过大"
+      validator: "V0_2"
+      fix:
+        - "统计节点数"
+        - ">8节点: 拆分为多个小图或转为表格"
+        - "复杂图: 保留核心节点，详情放表格"
+        
+    - error: "PDF生成失败"
+      validator: "V0_3"
+      fix:
+        - "检查HTML语法错误"
+        - "检查CSS语法错误"
+        - "检查图片路径"
+        - "简化后重试"
+
+  P2:
+    - error: "封面有白边"
+      validator: "V2_1"
+      fix:
+        - "确认body { margin: 0 }"
+        - "确认@page :first { margin: 0 }"
+        - "确认.cover { margin: 0 }"
+        
+    - error: "编号不连续"
+      validator: "V2_4"
+      fix:
+        - "检查所有data-label属性"
+        - "确保数字连续"
+        - "重新生成"
+
+  generic:
+    - name: "SIMPLIFY_HTML"
+      when: "PDF生成反复失败"
+      steps:
+        - "移除复杂CSS"
+        - "移除Mermaid图表"
+        - "使用基础HTML"
+        - "生成成功后再逐步添加复杂度"

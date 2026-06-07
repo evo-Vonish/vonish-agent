@@ -1,0 +1,125 @@
+# DOCX Procedure Graph — 可执行步骤图
+
+procedure:
+  name: "docx_creation"
+  description: "从Artifact Plan生成DOCX文档的完整流程"
+  
+  # === 入口判断 ===
+  entry:
+    condition: "用户请求创建/编辑Word文档"
+    routing:
+      - if: "存在目标.docx且格式重要"
+        path: "WIR_EDIT"
+      - if: "子代理返回.md文件需转换"
+        path: "MD2DOCX"
+      - else:
+        path: "CREATE_FROM_SCRATCH"
+  
+  # === 路径1: 从头创建 ===
+  steps_create:
+    - id: "S1"
+      name: "读取Artifact Plan"
+      action: "read_artifact_plan"
+      recall_checkpoint: "CP1"
+      outputs: ["sections_for_docx", "visual_tokens"]
+      
+    - id: "S2"
+      name: "读取Design Tokens"
+      action: "read_file"
+      target: "design_tokens.yaml"
+      outputs: ["palette", "fonts", "spacing", "page_settings"]
+      
+    - id: "S3"
+      name: "生成封面背景"
+      action: "generate_cover_background"
+      tool: "generate_image"
+      inputs: ["visual_tokens.cover_style", "visual_tokens.palette"]
+      outputs: ["cover_bg_path"]
+      
+    - id: "S4"
+      name: "编写C#生成代码"
+      action: "write_csharp_code"
+      tool: "write_file"
+      template: "CJKExample.cs"
+      rules:
+        - "RunFonts必须是RunProperties第一个子元素 [P0]"
+        - "表格GridColumn宽度与单元格宽度匹配 [P0]"
+        - "使用Artifact Plan定义的配色 [P1]"
+        - "封面使用生成的背景图 [P2]"
+        - "中文正文首行缩进480 [P2]"
+      outputs: ["Program.cs"]
+      
+    - id: "S5"
+      name: "编译并生成文档"
+      action: "build_docx"
+      tool: "shell"
+      command: "./scripts/docx build"
+      validation_gate: "VG1"
+      
+    - id: "S6"
+      name: "视觉验收"
+      action: "visual_review"
+      recall_checkpoint: "CP5"
+      rules:
+        - "封面有独特背景 [必须]"
+        - "三级颜色层级清晰 [必须]"
+        - "无占位符文本 [必须]"
+        - "页眉页脚完整 [必须]"
+      outputs: ["visual_review_passed"]
+      
+    - id: "S7"
+      name: "交付"
+      action: "deliver"
+      condition: "VG1 PASSED AND visual_review_passed"
+      outputs: [".docx file"]
+  
+  # === 路径2: WIR编辑 ===
+  steps_edit:
+    - id: "E1"
+      name: "读取WIR参考"
+      action: "read_wir_reference"
+      target: "references/wir-reference.md"
+      
+    - id: "E2"
+      name: "WIR读取文档"
+      action: "wir_read"
+      tool: "session.read"
+      
+    - id: "E3"
+      name: "执行编辑"
+      action: "wir_edit"
+      rules:
+        - "不大块替换 [P0]"
+        - "分窗口处理 [P2]"
+      
+    - id: "E4"
+      name: "保存并验证"
+      action: "wir_save"
+      validation_gate: "VG1"
+  
+  # === 路径3: MD转DOCX ===
+  steps_md2docx:
+    - id: "M1"
+      name: "读取md2docx参考"
+      action: "read_md2docx_reference"
+      target: "references/md2docx-reference.md"
+      
+    - id: "M2"
+      name: "执行转换"
+      action: "convert_md2docx"
+      tool: "md2docx pipeline"
+      
+    - id: "M3"
+      name: "验证转换结果"
+      action: "validate_conversion"
+      validation_gate: "VG1"
+
+# === 步骤依赖图 ===
+dependencies:
+  S1: []           # 读取Plan，无依赖
+  S2: [S1]         # 读取Tokens，依赖Plan
+  S3: [S1, S2]     # 生成背景，依赖Plan和Tokens
+  S4: [S1, S2, S3] # 写代码，依赖前面所有
+  S5: [S4]         # 编译，依赖代码
+  S6: [S5]         # 视觉验收，依赖生成结果
+  S7: [S6]         # 交付，依赖验收

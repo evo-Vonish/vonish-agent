@@ -1,0 +1,83 @@
+# PDF Validation Gates — 验证门槛
+
+validators:
+  P0:
+    - id: "V0_1"
+      name: "无CSS Counter"
+      check: "CSS中无counter-reset/counter-increment/content:counter()"
+      fail_action: "REPLACE_WITH_DATA_ATTR"
+      
+    - id: "V0_2"
+      name: "Mermaid图表高度安全"
+      check: "每个Mermaid图表≤8节点"
+      fail_action: "SPLIT_OR_SIMPLIFY"
+      
+    - id: "V0_3"
+      name: "文件可生成"
+      check: "pdf.sh成功退出"
+      fail_action: "FIX_HTML_ERRORS"
+      
+    - id: "V0_4"
+      name: "无占位符"
+      check: "无[TODO]/Lorem ipsum"
+      fail_action: "REPLACE_PLACEHOLDERS"
+
+  P1:
+    - id: "V1_1"
+      name: "输出PDF格式"
+      check: "文件扩展名为.pdf"
+      fail_action: "RENAME"
+      
+    - id: "V1_2"
+      name: "内容完整"
+      check: "artifact_plan的sections全部包含"
+      fail_action: "ADD_MISSING"
+
+  P2:
+    - id: "V2_1"
+      name: "封面占满整页"
+      check: "三重零边距设置正确"
+      weight: "high"
+      fail_action: "FIX_MARGINS"
+      
+    - id: "V2_2"
+      name: "三线表规范"
+      check: "顶线粗/底线粗/表头下线细"
+      weight: "high"
+      fail_action: "FIX_TABLE_BORDERS"
+      
+    - id: "V2_3"
+      name: "页眉页脚"
+      check: "@top-center和@bottom-center有内容"
+      weight: "medium"
+      fail_action: "ADD_HEADERS_FOOTERS"
+      
+    - id: "V2_4"
+      name: "编号正确"
+      check: "使用data-*属性，编号连续"
+      weight: "high"
+      fail_action: "FIX_NUMBERING"
+      
+    - id: "V2_5"
+      name: "分页控制"
+      check: "orphans/widows设置，无孤行"
+      weight: "medium"
+      fail_action: "ADD_PAGINATION_CSS"
+
+  P3:
+    - id: "V3_1"
+      name: "封面风格匹配"
+      check: "封面风格与文档类型匹配"
+      fail_action: "SWITCH_COVER_STYLE"
+      
+    - id: "V3_2"
+      name: "字体加载"
+      check: "@font-face有font-display:swap"
+      fail_action: "ADD_FONT_DISPLAY"
+
+execution_flow:
+  order: ["P0", "P1", "P2", "P3"]
+  P0_policy: { all_must_pass: true, if_fail: "STOP" }
+  P1_policy: { all_must_pass: true, if_fail: "WARN" }
+  P2_policy: { min_pass_ratio: 0.8, if_fail: "SUGGEST" }
+  P3_policy: { min_pass_ratio: 0.0, if_fail: "NOTE" }

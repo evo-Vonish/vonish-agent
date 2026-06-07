@@ -6,6 +6,7 @@ import type {
   MessageSegment,
   Model,
   ProjectSummary,
+  Reference,
   ToolCall,
   UploadedFileMeta,
   WorkspaceFilePreview,
@@ -377,6 +378,7 @@ interface BackendMessage {
   segments?: MessageSegment[] | null;
   tool_calls?: ToolCall[] | null;
   files?: UploadedFileMeta[] | null;
+  references?: Reference[] | null;
   timestamp: string;
 }
 
@@ -457,6 +459,92 @@ export async function previewWorkspaceFile(workspaceId: string, path: string): P
   return (await response.json()) as WorkspaceFilePreview;
 }
 
+/**
+ * Read the full content of a workspace file (not truncated, unlike preview).
+ * Returns `encoding: 'text'` for UTF-8 files and `encoding: 'base64'` for binary.
+ */
+export async function readWorkspaceFile(
+  workspaceId: string,
+  path: string,
+): Promise<{ content: string; encoding: 'text' | 'base64'; path: string }> {
+  const encodedPath = path.split('/').map(encodeURIComponent).join('/');
+  const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/files/${encodedPath}`);
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new Error(detail || `Failed to read file: HTTP ${response.status}`);
+  }
+  return (await response.json()) as { content: string; encoding: 'text' | 'base64'; path: string };
+}
+
+/** Write (save) text content to a workspace file, creating parent dirs as needed. */
+export async function saveWorkspaceFile(
+  workspaceId: string,
+  path: string,
+  content: string,
+): Promise<{ status: string; path: string; size: number }> {
+  const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/files`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path, content }),
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new Error(detail || `Failed to save file: HTTP ${response.status}`);
+  }
+  return (await response.json()) as { status: string; path: string; size: number };
+}
+
+// ── Structured document previews (PDF / DOCX / XLSX / PPTX) ──
+export interface DocPreviewError { code: string; message: string; recoverable?: boolean; suggested_action?: string }
+
+export interface DocBlock { id: string; type: string; level?: number; text?: string; rows?: string[][] }
+export interface PdfBlock { id: string; text: string; bbox: number[] }
+export interface PdfPageInfo { index: number; width: number; height: number; blocks: PdfBlock[] }
+export interface SheetInfo { name: string; rows: string[][]; merges: string[]; truncated?: boolean; maxRow?: number; maxCol?: number }
+export interface SlideElement { id: string; type: string; text: string; bbox: number[] }
+export interface SlideInfo { index: number; title: string; elements: SlideElement[]; width: number; height: number }
+
+export interface DocumentPreviewResult {
+  success: boolean;
+  kind?: 'pdf' | 'docx' | 'xlsx' | 'pptx';
+  error?: DocPreviewError;
+  pageCount?: number;
+  truncated?: boolean;
+  pages?: PdfPageInfo[];
+  blocks?: DocBlock[];
+  sheets?: SheetInfo[];
+  slides?: SlideInfo[];
+  slideWidth?: number;
+  slideHeight?: number;
+}
+
+export async function getDocumentPreview(workspaceId: string, path: string): Promise<DocumentPreviewResult> {
+  const params = new URLSearchParams({ path });
+  const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/document?${params}`);
+  if (!response.ok) {
+    return { success: false, error: { code: `HTTP_${response.status}`, message: `Preview failed: HTTP ${response.status}` } };
+  }
+  return (await response.json()) as DocumentPreviewResult;
+}
+
+export interface PdfPageResult {
+  success: boolean;
+  index?: number;
+  width?: number;
+  height?: number;
+  image?: string;
+  error?: DocPreviewError;
+}
+
+export async function getDocumentPage(workspaceId: string, path: string, page: number, scale = 1.5): Promise<PdfPageResult> {
+  const params = new URLSearchParams({ path, page: String(page), scale: String(scale) });
+  const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/document/page?${params}`);
+  if (!response.ok) {
+    return { success: false, error: { code: `HTTP_${response.status}`, message: `Page render failed: HTTP ${response.status}` } };
+  }
+  return (await response.json()) as PdfPageResult;
+}
+
 export async function createWorkspaceItem(
   workspaceId: string,
   input: { path: string; type: 'file' | 'folder'; content?: string },
@@ -529,11 +617,13 @@ export async function stopChat(conversationId: string): Promise<void> {
 export async function uploadConversationFiles(
   conversationId: string,
   files: File[],
+  workspaceId?: string | null,
 ): Promise<{ uploaded: UploadedFileMeta[]; failed: UploadedFileMeta[]; total: number; successful: number }> {
   const formData = new FormData();
   files.forEach((file) => formData.append('files', file));
 
-  const response = await fetch(`/api/uploads/${conversationId}`, {
+  const params = workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : '';
+  const response = await fetch(`/api/uploads/${conversationId}${params}`, {
     method: 'POST',
     body: formData,
   });
@@ -569,6 +659,7 @@ export async function streamChat(
     workspaceId?: string | null;
     permissionMode?: string;
     directoryAccessMode?: string;
+    references?: Array<Record<string, unknown>>;
   },
 ): Promise<void> {
   const response = await fetch(`/api/chat/${conversationId}/stream`, {
@@ -583,6 +674,7 @@ export async function streamChat(
       workspace_id: options?.workspaceId || null,
       permission_mode: options?.permissionMode || 'default',
       directory_access_mode: options?.directoryAccessMode || 'locked_workspace',
+      references: options?.references ?? [],
       resources: resources.map((file) => ({
         uri: file.resourceUri,
         mime_type: file.mimeType,

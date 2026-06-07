@@ -116,13 +116,11 @@ function TokenGauge({ used, budget }: { used: number; budget: number }) {
   );
 }
 
-/** Context sub-panel — ring gauge + stats + profile + compression */
+/** Context sub-panel — fixed 256k gauge + stats */
 function ContextSub({ onClose }: { onClose: () => void }) {
   const { t } = useI18n();
   const usage = useChatStore((s) => s.contextUsage);
-  const contextProfile = useChatStore((s) => s.contextProfile);
   const fetchContextUsage = useChatStore((s) => s.fetchContextUsage);
-  const switchContextProfile = useChatStore((s) => s.switchContextProfile);
   const [loading, setLoading] = useState(false);
 
   const hasData = usage !== null;
@@ -134,41 +132,6 @@ function ContextSub({ onClose }: { onClose: () => void }) {
     await fetchContextUsage();
     setLoading(false);
   };
-
-  const handleSwitchProfile = async (id: string) => {
-    const cid = useChatStore.getState().currentConversationId;
-    if (!cid) return;
-    switchContextProfile(id);
-    try {
-      await fetch(`/api/context/${cid}/profile`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ profile: id }),
-      });
-    } catch {}
-    await fetchContextUsage();
-  };
-
-  const handleCompact = async (level: string) => {
-    const state = useChatStore.getState();
-    const cid = state.currentConversationId;
-    if (!cid) return;
-    setLoading(true);
-    try {
-      await fetch(`/api/context/${cid}/compact?level=${level}&profile_name=${state.contextProfile.id}&model_id=${state.selectedModelId}`, { method: 'POST' });
-    } catch {}
-    await fetchContextUsage();
-    setLoading(false);
-  };
-
-  const compressionLevels = [
-    { value: 'none', label: '无' },
-    { value: 'light', label: '轻度' },
-    { value: 'medium', label: '中度' },
-    { value: 'aggressive', label: '激进' },
-  ];
-
-  const profiles = useChatStore.getState().availableProfiles;
 
   return (
     <div className="w-60" style={{ background: BG, border: BORDER, borderRadius: 14, boxShadow: SHADOW, padding: 6 }}>
@@ -230,49 +193,6 @@ function ContextSub({ onClose }: { onClose: () => void }) {
               </>
             )}
 
-            <div className="mx-2 border-t my-1" style={{ borderColor: DIV }} />
-
-            {/* Profile switcher */}
-            <div>
-              <div className="text-[10px] mb-1 px-2" style={{ color: TM }}>{t('context.profile')}</div>
-              <div className="grid grid-cols-3 gap-1 px-1">
-                {profiles.map((p) => (
-                  <button
-                    key={p.id}
-                    onClick={() => handleSwitchProfile(p.id)}
-                    className="rounded-md border px-1 py-0.5 text-[10px] transition-colors"
-                    style={{
-                      borderColor: (usage?.profile ?? contextProfile.id) === p.id ? 'rgba(74,144,217,0.4)' : 'rgba(255,255,255,0.08)',
-                      background: (usage?.profile ?? contextProfile.id) === p.id ? 'rgba(74,144,217,0.12)' : 'transparent',
-                      color: (usage?.profile ?? contextProfile.id) === p.id ? BLUE : T2,
-                    }}
-                  >
-                    {p.name}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Compression levels */}
-            <div className="mt-1">
-              <div className="text-[10px] mb-1 px-2" style={{ color: TM }}>{t('context.compression')}</div>
-              <div className="grid grid-cols-2 gap-1 px-1">
-                {compressionLevels.map((level) => (
-                  <button
-                    key={level.value}
-                    onClick={() => handleCompact(level.value)}
-                    className="rounded-md border px-2 py-0.5 text-[10px] transition-colors"
-                    style={{
-                      borderColor: contextProfile.compressionLevel === level.value ? 'rgba(74,144,217,0.4)' : 'rgba(255,255,255,0.08)',
-                      background: contextProfile.compressionLevel === level.value ? 'rgba(74,144,217,0.12)' : 'transparent',
-                      color: contextProfile.compressionLevel === level.value ? BLUE : T2,
-                    }}
-                  >
-                    {level.label}
-                  </button>
-                ))}
-              </div>
-            </div>
           </div>
         </>
       ) : (

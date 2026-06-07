@@ -1,17 +1,6 @@
 import { useEffect } from 'react';
-import { MainLayout } from '@/components/layout';
-import { MessageStream } from '@/components/chat';
-import { Composer } from '@/components/composer';
+import { AgentIDEShell } from '@/components/layout';
 import { useChatStore } from '@/stores/chatStore';
-
-function ChatPage() {
-  return (
-    <MainLayout>
-      <MessageStream className="flex-1" />
-      <Composer />
-    </MainLayout>
-  );
-}
 
 function App() {
   const initialize = useChatStore((state) => state.initialize);
@@ -20,7 +9,7 @@ function App() {
     void initialize();
   }, [initialize]);
 
-  return <ChatPage />;
+  return <AgentIDEShell />;
 }
 
 export default App;

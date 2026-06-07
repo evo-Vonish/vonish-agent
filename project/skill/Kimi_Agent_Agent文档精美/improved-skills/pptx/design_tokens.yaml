@@ -1,0 +1,149 @@
+# PPTX Design Tokens — 视觉设计令牌
+
+# === 配色方案 ===
+palettes:
+  # 场景档案配色
+  business_insight:
+    primary: "#1e3a5f"
+    secondary: "#4a5568"
+    accent: "#c9a227"
+    background: "#f0f1f3"
+    text: "#1a1a2e"
+    
+  academic:
+    primary: "#1a365d"
+    secondary: "#2d3748"
+    accent: "#9b2c2c"
+    background: "#ffffff"
+    text: "#1a202c"
+    
+  promotion:
+    primary: "#E63946"  # 根据品牌色
+    secondary: "#457B9D"
+    accent: "#F1FAEE"
+    background: "#1D3557"
+    text: "#F1FAEE"
+    
+  education:
+    science: "#3182ce"
+    humanities: "#c05621"
+    art: "#805ad5"
+    background: "#f7fafc"
+    text: "#2d3748"
+    
+  work_report:
+    primary: "#c53030"
+    secondary: "#2b6cb0"
+    accent: "#d69e2e"
+    background: "#ffffff"
+    text: "#2d3748"
+    
+  strategic:
+    primary: "#276749"
+    secondary: "#2c5282"
+    accent: "#48bb78"
+    background: "#f7fafc"
+    text: "#1a202c"
+    
+  general:
+    primary: "#1e3a5f"
+    secondary: "#4a5568"
+    accent: "#c9a227"
+    background: "#f0f1f3"
+    text: "#1a1a2e"
+
+# === 布局模式库 ===
+layout_patterns:
+  grid_highlights:  # 模式A
+    name: "宫格亮点"
+    structure: "3x2卡片网格"
+    use_for: "投资亮点、核心卖点、6大优势"
+    elements_per_card: "图标 + 标题 + 2行摘要"
+    max_items: 6
+    
+  dual_charts:  # 模式B
+    name: "双图表"
+    structure: "左右并列两个图表"
+    use_for: "数据对比、多维分析"
+    width_split: "45% + 10% gap + 45%"
+    
+  comparison_flow:  # 模式C
+    name: "对比流程"
+    structure: "顶部水平箭头 + 底部对比表格"
+    use_for: "竞争分析、方案对比"
+    
+  strategic_pillars:  # 模式D
+    name: "战略支柱"
+    structure: "纵向标签胶囊 + 要点列表"
+    use_for: "公司定位、战略框架"
+    points_per_pillar: "3-5"
+    
+  three_column:  # 模式E
+    name: "三栏矩阵"
+    structure: "三个并列模块 + 底部图标"
+    use_for: "核心优势、产品矩阵"
+    
+  top_bottom:  # 模式F
+    name: "上下对比"
+    structure: "上部流程图 + 下部标注框"
+    use_for: "技术差异化、流程对比"
+    
+  image_grid:  # 模式G
+    name: "图片网格"
+    structure: "三栏图片 + 说明文字"
+    use_for: "产品展示、案例展示"
+    requires: "真实图片"
+    
+  summary_banner:  # 模式H
+    name: "底部总结横幅"
+    structure: "页面内容 + 底部全宽主色矩形"
+    use_for: "结论页、关键信息强调"
+    banner_height: "15-20%"
+
+# === 字体规范 ===
+fonts:
+  chinese: "MiSans"
+  english: "Inter"
+  heading_bold: true
+  min_body_size: 18
+  min_title_size: 28
+
+# === 内容规则 ===
+content_rules:
+  one_message_per_page: true
+  max_body_chars: 50  # 中文
+  max_body_words: 80  # 英文
+  highlight_data_points: "3-6 per page"
+  chart_over_text: true  # 优先图表
+  data_supports_claim: true  # 每个论点有数据支撑
+
+# === 信息密度 ===
+density:
+  academic: { body_size: 18, title_size: 28 }
+  business_report: { body_size: 20, title_size: 28 }
+  brand_launch: { body_size: 22, title_size: 32 }
+  data_dashboard: { body_size: 16, title_size: 24 }
+
+# === 封面冲击模式 ===
+cover_impact:
+  hero:
+    description: "全出血图片 + 渐变遮罩"
+    use_for: "情感冲击"
+  swiss_grid:
+    description: "精确几何 + 强字体"
+    use_for: "权威感"
+  magazine:
+    description: "非对称图文切割"
+    use_for: "编辑精致感"
+  frame:
+    description: "图片在几何容器中"
+    use_for: "优雅感"
+
+# === 颜色禁忌 ===
+color_prohibitions:
+  - "纯蓝 #0000FF"
+  - "纯红 #FF0000"
+  - "纯绿 #00FF00"
+  - "紫色渐变"
+  - "渐变白紫"
+  - "红绿黄三色组合"

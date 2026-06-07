@@ -8,13 +8,14 @@ Add-Type -AssemblyName System.Drawing
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $backend = Join-Path $root "backend"
 $venvPython = Join-Path $backend ".venv\Scripts\python.exe"
-$url = "http://127.0.0.1:8000"
+$backendPort = 18480
+$url = "http://127.0.0.1:$backendPort"
 $backendProcess = $null
 
 # ── Helpers ──────────────────────────────────────────
 function Start-Backend {
     param([bool]$wait = $true)
-    $running = Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue
+    $running = Get-NetTCPConnection -LocalPort $backendPort -ErrorAction SilentlyContinue
     if ($running) {
         Write-Host "[VonishAgent] 后端已在运行"
         return $true
@@ -27,7 +28,7 @@ function Start-Backend {
     if ($wait) {
         for ($i = 0; $i -lt 15; $i++) {
             Start-Sleep -Seconds 1
-            $check = Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue
+            $check = Get-NetTCPConnection -LocalPort $backendPort -ErrorAction SilentlyContinue
             if ($check) { Write-Host "[VonishAgent] 就绪"; return $true }
         }
         Write-Host "[VonishAgent] 启动超时"
@@ -44,7 +45,7 @@ function Stop-Backend {
         Write-Host "[VonishAgent] 后端已停止"
     }
     # Also kill by port
-    $conn = Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue
+    $conn = Get-NetTCPConnection -LocalPort $backendPort -ErrorAction SilentlyContinue
     if ($conn) {
         $pid = $conn.OwningProcess
         Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue

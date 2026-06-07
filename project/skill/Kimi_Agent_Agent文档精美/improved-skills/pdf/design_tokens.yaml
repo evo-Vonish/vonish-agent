@@ -1,0 +1,160 @@
+# PDF Design Tokens — 视觉设计令牌
+
+# === 配色方案（CSS变量格式）===
+palettes:
+  ocean:
+    primary: "#0E4A6B"
+    secondary: "#3A7CA5"
+    accent: "#5BC0BE"
+    dark: "#1A2634"
+    mid: "#2E5984"
+    light: "#90E0EF"
+    border: "#C7E8F3"
+    bg: "#EDF6F9"
+    
+  sunset:
+    primary: "#C75146"
+    secondary: "#E8890C"
+    accent: "#F4A261"
+    dark: "#5D2E1F"
+    mid: "#B85C2A"
+    light: "#E9C46A"
+    border: "#F5DCC8"
+    bg: "#FFF5EB"
+    
+  forest:
+    primary: "#2D6A4F"
+    secondary: "#40916C"
+    accent: "#52B788"
+    dark: "#1B4332"
+    mid: "#35875E"
+    light: "#74C69D"
+    border: "#B7E4C7"
+    bg: "#E8F5E9"
+    
+  berry:
+    primary: "#7B2D58"
+    secondary: "#A8578D"
+    accent: "#D4A5C3"
+    dark: "#4A1940"
+    mid: "#8F3A6C"
+    light: "#E8C4DA"
+    border: "#F2D8EA"
+    bg: "#FCF0F6"
+    
+  vibrant:
+    primary: "#E63946"
+    secondary: "#F77F00"
+    accent: "#FCBF49"
+    dark: "#2B2D42"
+    mid: "#D62839"
+    light: "#8D99AE"
+    border: "#C8D0DB"
+    bg: "#F8F9FA"
+    
+  corporate:
+    primary: "#34495E"
+    secondary: "#5D6D7E"
+    accent: "#85929E"
+    dark: "#1C2833"
+    mid: "#4A5F72"
+    light: "#AEB6BF"
+    border: "#D5D8DC"
+    bg: "#F4F6F7"
+    
+  pastel:
+    primary: "#6C5CE7"
+    secondary: "#A29BFE"
+    accent: "#FD79A8"
+    dark: "#2D3436"
+    mid: "#7B6FE6"
+    light: "#B2BEC3"
+    border: "#DFE6E9"
+    bg: "#F5F6FA"
+    
+  earth:
+    primary: "#8B5E3C"
+    secondary: "#A0522D"
+    accent: "#CD853F"
+    dark: "#4E342E"
+    mid: "#9C6B45"
+    light: "#D2B48C"
+    border: "#E6D5C3"
+    bg: "#FAF5EF"
+
+# === 字体规范 ===
+fonts:
+  body: "Georgia, 'Noto Serif', serif"
+  body_size: "11pt"
+  line_height: "1.7"
+  heading: "Georgia, 'Noto Serif', serif"
+  heading_color: "#2c3e50"
+  code: "'Courier New', monospace"
+  code_bg: "#f5f5f5"
+
+# === 页面设置 ===
+page:
+  size: "A4"
+  margin_top: "2.5cm"
+  margin_bottom: "2.5cm"
+  margin_left: "2cm"
+  margin_right: "2cm"
+  header_font_size: "9pt"
+  footer_font_size: "9pt"
+
+# === 封面风格 ===
+cover_styles:
+  minimal:
+    description: "白色背景、居中排版、无装饰"
+    css: "background: white; text-align: center;"
+    use_for: "学术论文、正式课程"
+    
+  muji:
+    description: "细边框 + 角方块 + 大量留白"
+    css: "border: 1px solid #333; padding: 3cm;"
+    use_for: "日式、极简生活"
+    
+  swiss_grid:
+    description: "网格线 + 角块 + 强调条"
+    css: "grid lines + corner blocks + accent bar"
+    use_for: "专业报告、企业文档"
+    
+  soft_blocks:
+    description: "柔和色矩形 + 透明度叠加"
+    use_for: "温暖、教育、医疗"
+    
+  bauhaus:
+    description: "散落几何形状(圆、三角、矩形)"
+    use_for: "艺术、设计、创意"
+
+# === 三线表规范 ===
+table:
+  top_border: "2px solid #2c3e50"
+  bottom_border: "2px solid #2c3e50"
+  header_bottom: "1px solid #2c3e50"
+  header_bg: "#f8f7f5"
+  cell_padding: "6pt 8pt"
+  font_size: "10pt"
+
+# === 禁止的UI组件 ===
+forbidden_components:
+  - name: "卡片组件(边框+标题栏)"
+    replace_with: "三线表或纯段落"
+  - name: "统计仪表板(数字卡网格)"
+    replace_with: "表格展示数据"
+  - name: "深色标题栏"
+    replace_with: "粗体标题 + 细边框或左边框"
+  - name: "时间线组件"
+    replace_with: "编号列表或表格"
+  - name: "深色代码块"
+    replace_with: "浅灰背景 #f5f5f5"
+  - name: "圆角边框"
+    replace_with: "直角或无边框"
+
+# === 编号系统 ===
+numbering:
+  method: "data-attributes"  # 禁止CSS Counter
+  figure_prefix: "图 "
+  table_prefix: "表 "
+  equation_prefix: "("
+  equation_suffix: ")"

@@ -1,0 +1,173 @@
+# DOCX Design Tokens — 视觉设计令牌
+
+# === 配色方案 ===
+palettes:
+  # 基础4套
+  natural_green:
+    primary: "4A6741"
+    secondary: "7C9885"
+    accent: "9CAF88"
+    dark: "2D3A27"
+    mid: "5A6B54"
+    light: "8B9E85"
+    border: "C8D4C4"
+    table_header_bg: "EEF2EC"
+    
+  mocha_gold:
+    primary: "5D4037"
+    secondary: "795548"
+    accent: "D4A574"
+    dark: "3E2723"
+    mid: "6D4C41"
+    light: "A1887F"
+    border: "D7CCC8"
+    table_header_bg: "EFEBE9"
+    
+  ink_slate:
+    primary: "37474F"
+    secondary: "546E7A"
+    accent: "78909C"
+    dark: "263238"
+    mid: "455A64"
+    light: "90A4AE"
+    border: "CFD8DC"
+    table_header_bg: "ECEFF1"
+    
+  berry_plum:
+    primary: "6B3A5B"
+    secondary: "8E6278"
+    accent: "C9A0B5"
+    dark: "4A1F40"
+    mid: "7B4D6E"
+    light: "B084A5"
+    border: "E0C8D8"
+    table_header_bg: "F3E8F0"
+    
+  # 扩展8套
+  ocean:
+    primary: "0E4A6B"
+    secondary: "3A7CA5"
+    accent: "5BC0BE"
+    dark: "1A2634"
+    mid: "2E5984"
+    light: "90E0EF"
+    border: "C7E8F3"
+    table_header_bg: "EDF6F9"
+    
+  sunset:
+    primary: "C75146"
+    secondary: "E8890C"
+    accent: "F4A261"
+    dark: "5D2E1F"
+    mid: "B85C2A"
+    light: "E9C46A"
+    border: "F5DCC8"
+    table_header_bg: "FFF5EB"
+    
+  forest:
+    primary: "2D6A4F"
+    secondary: "40916C"
+    accent: "52B788"
+    dark: "1B4332"
+    mid: "35875E"
+    light: "74C69D"
+    border: "B7E4C7"
+    table_header_bg: "E8F5E9"
+    
+  berry:
+    primary: "7B2D58"
+    secondary: "A8578D"
+    accent: "D4A5C3"
+    dark: "4A1940"
+    mid: "8F3A6C"
+    light: "E8C4DA"
+    border: "F2D8EA"
+    table_header_bg: "FCF0F6"
+
+# === 字体规范 ===
+fonts:
+  chinese_body: "Microsoft YaHei"
+  chinese_heading: "Microsoft YaHei"
+  english_body: "Calibri"
+  english_heading: "Calibri"
+  fallback: "SimSun"
+
+# === 字号层级（半磅单位） ===
+font_sizes:
+  cover_title: 72
+  cover_subtitle: 24
+  cover_meta: 20
+  h1: 36
+  h2: 28
+  h3: 24
+  body: 21
+  caption: 20
+  footer: 18
+
+# === 间距规范（缇单位，1/20 pt） ===
+spacing:
+  h1_before: 600
+  h1_after: 240
+  h2_before: 400
+  h2_after: 160
+  paragraph: 160
+  line_height: 360  # 1.5倍行距
+  cover_spacing: 40  # 大标题字间距
+
+# === CJK特殊规范 ===
+cjk:
+  body_first_line_indent: "480"  # 2字符
+  heading_first_line_indent: "0"
+  default_font_size: "21"  # 10.5pt
+
+# === 封面风格 ===
+cover_styles:
+  - name: "morandi_curves"
+    technique: "径向渐变 + 模糊椭圆 + 柔和曲线"
+    mood: "温和、有机"
+  - name: "ink_wash"
+    technique: "SVG湍流滤镜 + 灰度"
+    mood: "CJK文学、传统文化"
+  - name: "swiss_grid"
+    technique: "精确细线 + 几何块"
+    mood: "专业报告、企业文档"
+  - name: "geometric_blocks"
+    technique: "重叠圆弧 + 透明度叠加"
+    mood: "大胆几何风格"
+  - name: "gradient_ribbons"
+    technique: "柔和渐变椭圆 + 小点"
+    mood: "优雅过渡效果"
+  - name: "formal_double_border"
+    technique: "嵌套边框 + 角装饰"
+    mood: "传统正式文档"
+
+# === 表格样式 ===
+table_styles:
+  academic_three_line:
+    top_border_size: 12
+    bottom_border_size: 12
+    header_bottom_size: 4
+    left_border: "Nil"
+    right_border: "Nil"
+    use_alt_rows: true
+    alt_row_color: "F9F9F9"
+    
+  business:
+    use_header_fill: true
+    header_text_color: "FFFFFF"
+    use_full_border: true
+    border_size: 4
+    use_alt_rows: true
+
+# === 页面尺寸（A4） ===
+page:
+  width_twips: 11906
+  height_twips: 16838
+  width_emu: 7560000
+  height_emu: 10692000
+  margin_top: 1800
+  margin_right: 1440
+  margin_bottom: 1440
+  margin_left: 1440
+  margin_header: 720
+  margin_footer: 720

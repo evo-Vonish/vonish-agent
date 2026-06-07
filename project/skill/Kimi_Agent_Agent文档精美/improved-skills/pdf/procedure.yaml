@@ -1,0 +1,133 @@
+# PDF Procedure Graph — 可执行步骤图
+
+procedure:
+  name: "pdf_creation"
+  description: "从Artifact Plan生成PDF文档的完整流程"
+  
+  entry:
+    condition: "用户请求创建PDF"
+    routing:
+      - if: "用户明确要求LaTeX"
+        path: "LATEX_ROUTE"
+      - if: "处理现有PDF（合并/提取等）"
+        path: "PROCESS_ROUTE"
+      - else:
+        path: "HTML_ROUTE"  # 默认路径
+  
+  # === HTML路由（默认）===
+  steps_html:
+    - id: "S1"
+      name: "读取Artifact Plan"
+      action: "read_artifact_plan"
+      recall_checkpoint: "CP1"
+      outputs: ["sections_for_pdf", "visual_tokens"]
+      
+    - id: "S2"
+      name: "读取Design Tokens"
+      action: "read_file"
+      target: "design_tokens.yaml"
+      outputs: ["palette_css", "fonts", "page_settings", "table_css"]
+      
+    - id: "S3"
+      name: "读取HTML路由参考"
+      action: "read_route_file"
+      target: "routes/html.md"
+      outputs: ["html_patterns", "css_templates"]
+      
+    - id: "S4"
+      name: "编写HTML源文件"
+      action: "write_html"
+      tool: "write_file"
+      rules:
+        - "body { margin: 0; } [P0]"
+        - "@page :first { margin: 0; } [P0]"
+        - "使用data-*属性编号，禁止CSS Counter [P0]"
+        - "使用artifact_plan定义配色 [P1]"
+        - "三线表样式 [P2]"
+        - "封面占满整页 [P2]"
+      outputs: ["source.html"]
+      
+    - id: "S5"
+      name: "检查CSS Counter"
+      action: "css_counter_audit"
+      condition: "自动执行"
+      check: "无counter-reset/counter-increment"
+      fix: "替换为data-*属性+显式数字 [P0]"
+      
+    - id: "S6"
+      name: "检查Mermaid图表"
+      action: "mermaid_height_check"
+      condition: "存在Mermaid图表"
+      check: "每个图表≤8节点"
+      fix: "超过则转换为表格+简化图 [P0]"
+      
+    - id: "S7"
+      name: "转换为PDF"
+      action: "convert_to_pdf"
+      tool: "shell"
+      command: "./scripts/pdf.sh html source.html --output output.pdf"
+      validation_gate: "VG1"
+      
+    - id: "S8"
+      name: "视觉验收"
+      action: "visual_review"
+      recall_checkpoint: "CP5"
+      rules:
+        - "封面占满整页无白边 [必须]"
+        - "三线表规范 [必须]"
+        - "无编号异常 [必须]"
+        - "分页正确无截断 [必须]"
+      outputs: ["visual_review_passed"]
+      
+    - id: "S9"
+      name: "交付"
+      action: "deliver"
+      condition: "VG1 PASSED AND visual_review_passed"
+      outputs: [".pdf file"]
+  
+  # === LaTeX路由 ===
+  steps_latex:
+    - id: "L1"
+      name: "读取LaTeX路由参考"
+      action: "read_route_file"
+      target: "routes/latex.md"
+      
+    - id: "L2"
+      name: "编写.tex文件"
+      action: "write_tex"
+      
+    - id: "L3"
+      name: "编译PDF"
+      action: "compile"
+      tool: "./scripts/pdf.sh latex"
+      
+    - id: "L4"
+      name: "验证"
+      action: "validate"
+      validation_gate: "VG1"
+  
+  # === Process路由 ===
+  steps_process:
+    - id: "P1"
+      name: "读取Process路由参考"
+      action: "read_route_file"
+      target: "routes/process.md"
+      
+    - id: "P2"
+      name: "执行处理"
+      action: "process"
+      tool: "Python + pikepdf/pdfplumber"
+      
+    - id: "P3"
+      name: "验证"
+      action: "validate"
+
+# === 验证门 ===
+validation_gates:
+  VG1:
+    name: "PDF生成验证"
+    checks:
+      - "文件可打开"
+      - "页数正确"
+      - "分页无内容截断"
+    must_pass_P0: true

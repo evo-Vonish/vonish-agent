@@ -26,6 +26,7 @@ import {
 } from '@/services/api';
 import { useChatStore } from '@/stores/chatStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
+import { useWorkbenchStore } from '@/stores/workbenchStore';
 import { useI18n } from '@/i18n';
 
 type PanelMode = 'preview' | 'diff' | 'history';
@@ -222,6 +223,7 @@ export function WorkspacePanel({ currentConversationId }: { currentConversationI
   } = useWorkspaceStore();
   const inputText = useChatStore((state) => state.inputText);
   const setInputText = useChatStore((state) => state.setInputText);
+  const openFile = useWorkbenchStore((state) => state.openFile);
   const [selectedPath, setSelectedPath] = useState('');
   const [preview, setPreview] = useState<WorkspaceFilePreview | null>(null);
   const [diff, setDiff] = useState<GitDiffResult | null>(null);
@@ -250,6 +252,10 @@ export function WorkspacePanel({ currentConversationId }: { currentConversationI
     setSelectedPath(node.path);
     setMode('preview');
     if (!activeId) return;
+    if (node.type === 'file') {
+      // Open the file as an editable workbench tab.
+      void openFile(activeId, node.path);
+    }
     setBusy(true);
     try {
       setPreview(await previewWorkspaceFile(activeId, node.path));

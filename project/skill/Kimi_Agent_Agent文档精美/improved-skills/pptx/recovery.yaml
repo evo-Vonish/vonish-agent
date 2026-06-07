@@ -1,0 +1,79 @@
+# PPTX Recovery Playbook
+
+recovery:
+  P0:
+    - error: "TextOverflowWarning"
+      validator: "V0_2"
+      fix:
+        - "文本缩减到当前长度的90%"
+        - "或增大bounds.width"
+        - "或减小fontSize（但不低于18px）"
+        - "重新check"
+        
+    - error: "TextOcclusionWarning"
+      validator: "V0_3"
+      fix:
+        - "检查被遮挡元素的z-order"
+        - "将被遮挡元素移到elements数组后面"
+        - "或减少遮挡元素的不透明度"
+        - "重新check"
+        
+    - error: "check.sh报告errors"
+      validator: "V0_1"
+      fix:
+        - "读取error详情"
+        - "定位到具体.page文件"
+        - "修复错误"
+        - "重新check直到0 errors"
+        
+    - error: "正文字号<18px"
+      validator: "V0_4"
+      fix:
+        - "增大body textStyle的fontSize到18"
+        - "如果内容放不下，精简内容或增大页面"
+        
+    - error: "重复的elementId"
+      validator: "V0_6"
+      fix:
+        - "搜索重复的elementId"
+        - "重命名其中一个"
+        - "确保每页内唯一"
+
+  P2:
+    - error: "AI典型配色"
+      validator: "V2_1"
+      fix:
+        - "从design_tokens选择非AI palette"
+        - "推荐: corporate/ocean/earth"
+        - "更新theme.colors"
+        
+    - error: "封面无冲击力"
+      validator: "V2_2"
+      fix:
+        - "换用Hero/Magazine/Swiss/Frame封面"
+        - "增加视觉元素（图片/几何/渐变）"
+        
+    - error: "字号差异不足"
+      validator: "V2_3"
+      fix:
+        - "增大title fontSize"
+        - "或减小body fontSize（不低于18）"
+        - "确保差异≥8px"
+
+  generic:
+    - name: "CHECK_FIX_LOOP"
+      description: "检查-修复循环"
+      when: "checker持续报告warnings"
+      steps:
+        - "运行check.sh"
+        - "按优先级修复warnings"
+        - "重新check"
+        - "重复直到0 warnings或只剩P3级"
+        
+    - name: "PAGE_REGENERATE"
+      description: "单页重新生成"
+      when: "某个page问题太多"
+      steps:
+        - "删除有问题的.page"
+        - "重新生成该page"
+        - "重新check"

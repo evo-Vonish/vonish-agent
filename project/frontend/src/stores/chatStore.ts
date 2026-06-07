@@ -34,6 +34,9 @@ import { generateId } from '@/lib/utils';
 import { useWorkspaceStore } from './workspaceStore';
 import { useToolStore } from './useToolStore';
 import { useSessionDraftStore } from './sessionDraftStore';
+import { useReferenceStore } from './referenceStore';
+import { useContextToastStore } from './contextToastStore';
+import { useWorkbenchStore } from './workbenchStore';
 
 type InteractiveToolType = 'ask_user_question' | 'request_approval';
 
@@ -136,7 +139,7 @@ const fallbackModels: Model[] = [
     provider: 'deepseek',
     description: 'Fast DeepSeek chat model',
     maxTokens: 8192,
-    contextWindow: 1_000_000,
+    contextWindow: 256_000,
     tags: ['chat'],
   },
   {
@@ -145,7 +148,7 @@ const fallbackModels: Model[] = [
     provider: 'deepseek',
     description: 'DeepSeek reasoning model',
     maxTokens: 8192,
-    contextWindow: 1_000_000,
+    contextWindow: 256_000,
     tags: ['thinking'],
   },
   {
@@ -353,6 +356,7 @@ function executionStepType(value: unknown): ExecutionStep['type'] {
     type === 'command' ||
     type === 'web_search' ||
     type === 'web_fetch' ||
+    type === 'research' ||
     type === 'recall' ||
     type === 'user_interaction' ||
     type === 'system_notice' ||
@@ -529,6 +533,30 @@ function normalizeToolCall(raw: unknown): ToolCall {
   return tool;
 }
 
+function normalizeArtifactRef(raw: unknown, fallbackWorkspaceId?: string | null) {
+  const source = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const artifactSource =
+    source.artifact && typeof source.artifact === 'object'
+      ? (source.artifact as Record<string, unknown>)
+      : source;
+  const path = String(artifactSource.path ?? artifactSource.workspacePath ?? '');
+  const title = String(artifactSource.title ?? artifactSource.name ?? path.split(/[\\/]/).pop() ?? 'Artifact');
+  return {
+    id: String(artifactSource.id ?? source.call_id ?? path ?? generateId()),
+    title,
+    path,
+    workspaceId:
+      artifactSource.workspaceId === undefined && source.workspace_id === undefined
+        ? fallbackWorkspaceId ?? null
+        : String(artifactSource.workspaceId ?? source.workspace_id ?? fallbackWorkspaceId ?? ''),
+    mimeType: artifactSource.mimeType ? String(artifactSource.mimeType) : artifactSource.mime_type ? String(artifactSource.mime_type) : undefined,
+    kind: artifactSource.kind ? String(artifactSource.kind) : undefined,
+    size: optionalNumber(artifactSource.size),
+    sourceToolCallId: artifactSource.sourceToolCallId ? String(artifactSource.sourceToolCallId) : source.call_id ? String(source.call_id) : undefined,
+    description: artifactSource.description ? String(artifactSource.description) : undefined,
+  };
+}
+
 function normalizeAssistantSegments(
   rawSegments: MessageSegment[] | null | undefined,
   thinking: string | null | undefined,
@@ -572,6 +600,23 @@ function normalizeAssistantSegments(
           ...createWorkflowErrorSegment(source.error ?? source),
           id: String(source.id || `workflow-error-${index}`),
           retryPrompt: source.retryPrompt ? String(source.retryPrompt) : undefined,
+        });
+      } else if (source.type === 'artifact' && source.artifact && typeof source.artifact === 'object') {
+        const artifact = source.artifact as Record<string, unknown>;
+        normalized.push({
+          id: String(source.id || `artifact-${index}`),
+          type: 'artifact',
+          artifact: {
+            id: String(artifact.id || artifact.path || generateId()),
+            title: String(artifact.title || artifact.path || 'Artifact'),
+            path: String(artifact.path || ''),
+            workspaceId: artifact.workspaceId === undefined || artifact.workspaceId === null ? null : String(artifact.workspaceId),
+            mimeType: artifact.mimeType ? String(artifact.mimeType) : undefined,
+            kind: artifact.kind ? String(artifact.kind) : undefined,
+            size: optionalNumber(artifact.size),
+            sourceToolCallId: artifact.sourceToolCallId ? String(artifact.sourceToolCallId) : undefined,
+            description: artifact.description ? String(artifact.description) : undefined,
+          },
         });
       }
     });
@@ -681,6 +726,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               segments: segments.length ? segments : undefined,
               toolCalls: toolCalls.length ? toolCalls : undefined,
               files: m.files ?? undefined,
+              references: m.references ?? undefined,
               type: 'text',
               timestamp: Date.parse(m.timestamp) || Date.now(),
               status: 'complete' as const,
@@ -745,11 +791,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   sendMessage: async (content, options = {}) => {
     if (get().isStreaming) return;
+    const usage = get().contextUsage;
+    if (usage && usage.totalTokens >= usage.maxTokens) {
+      set({ apiError: '上下文已达到固定 256K 限制，请新建对话后继续。' });
+      return;
+    }
     const internalContinue = Boolean(options.internalContinue);
     const attachmentSnapshot = internalContinue ? [] : get().attachments;
     const hasAttachments = attachmentSnapshot.length > 0;
+    const referenceList = internalContinue ? [] : useReferenceStore.getState().references;
     const trimmedContent = content.trim();
-    if (!trimmedContent && !hasAttachments) return;
+    if (!trimmedContent && !hasAttachments && referenceList.length === 0) return;
 
     let conversationId = get().currentConversationId;
     if (!conversationId) {
@@ -766,16 +818,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
         content: trimmedContent,
         type: 'text',
         files: attachmentSnapshot.map(queuedFileMeta),
+        references: referenceList,
         timestamp: Date.now(),
         status: 'complete',
       };
       get().addMessage(userMsg);
+      set({ attachments: [] });
+      useReferenceStore.getState().clearReferences();
     }
 
     const assistantMsg: Message = {
       id: generateId(),
       role: 'assistant',
-      content: hasAttachments ? `正在处理文件：共 ${attachmentSnapshot.length} 个` : '',
+      content: '',
       type: 'text',
       timestamp: Date.now(),
       status: 'streaming',
@@ -797,8 +852,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
     let activeTextSegmentId: string | null = null;
     let activeExecutionSegmentId: string | null = null;
     let structuredExecutionActive = false;
-    let showingFileProcessing = hasAttachments;
-    let completedSend = false;
     let shouldAutoResumeWorkflow = false;
 
     const appendSegment = (segment: MessageSegment) => {
@@ -873,12 +926,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         await useWorkspaceStore.getState().selectWorkspace(selectedWorkspaceId);
       }
       if (hasAttachments) {
-        set((state) => ({
-          attachments: state.attachments.map((attachment) => ({ ...attachment, uploading: true })),
-        }));
         const uploadResult = await uploadConversationFiles(
           conversationId,
           attachmentSnapshot.map((attachment) => attachment.file),
+          selectedWorkspaceId,
         );
         uploadedFiles = [
           ...uploadResult.uploaded,
@@ -896,10 +947,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
         uploadedFiles,
         ({ event, data }) => {
           if (abort.signal.aborted) return;
-          if (showingFileProcessing && event !== 'message_start') {
-            showingFileProcessing = false;
-            get().updateMessage(currentMsgId, { content: '' });
-          }
           if (event === 'segment_start') {
             const execution = normalizeExecutionSegment({
               ...data,
@@ -1016,6 +1063,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
             });
             set({ apiError: `${error.title}: ${error.message}` });
             shouldAutoResumeWorkflow = error.recoverable;
+            return;
+          }
+
+          if (event === 'artifact_open') {
+            const artifact = normalizeArtifactRef(data, selectedWorkspaceId);
+            if (artifact.path) {
+              appendSegment({ id: `artifact-${artifact.id}`, type: 'artifact', artifact });
+              void useWorkbenchStore.getState().openFile(
+                artifact.workspaceId ?? selectedWorkspaceId,
+                artifact.path,
+              );
+            }
             return;
           }
 
@@ -1217,12 +1276,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
           if (event === 'error') {
             const detail = String(data.detail ?? 'Unknown API error');
+            const errorCode = String(data.code ?? 'stream_error');
             console.error('Chat stream returned error event', data);
             const current = get().messages.find((m) => m.id === currentMsgId);
             const errorSegment = createWorkflowErrorSegment(data, {
               title: '工作流已中断',
               message: detail,
-              errorType: String(data.code ?? 'stream_error'),
+              errorType: errorCode,
               severity: 'error',
             });
             get().updateMessage(currentMsgId, {
@@ -1235,7 +1295,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               ],
             });
             set({ apiError: detail, isStreaming: false });
-            shouldAutoResumeWorkflow = true;
+            shouldAutoResumeWorkflow = errorCode !== 'CONTEXT_LIMIT_EXCEEDED';
             return;
           }
 
@@ -1274,6 +1334,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
             return;
           }
 
+          if (event === 'context_status') {
+            useContextToastStore.getState().pushContextToast(data);
+            return;
+          }
+
           if (event === 'message_end') {
             get().updateMessage(currentMsgId, { status: 'complete' });
             set({ isStreaming: false });
@@ -1285,6 +1350,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
           workspaceId: selectedWorkspaceId,
           permissionMode: sessionDraft.permissionMode,
           directoryAccessMode: sessionDraft.directoryAccessMode,
+          references: referenceList.map((ref) => ({
+            sourceType: ref.sourceType,
+            sourceId: ref.sourceId,
+            title: ref.title,
+            preview: ref.preview,
+            instruction: ref.instruction,
+            location: ref.location,
+            payload: ref.payload,
+          })),
         },
       );
 
@@ -1310,7 +1384,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           })
           .catch(() => {});
       }
-      completedSend = true;
+      // Completed successfully; attachments/references were already hidden from
+      // the composer when the user sent the message.
     } catch (error) {
       // AbortError is expected on user-triggered stop — not a real error
       if (error instanceof DOMException && error.name === 'AbortError') {
@@ -1343,7 +1418,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set((state) => ({
         isStreaming: false,
         _abortController: null,
-        attachments: !internalContinue && completedSend ? [] : state.attachments.map((attachment) => ({ ...attachment, uploading: false })),
+        attachments: state.attachments.map((attachment) => ({ ...attachment, uploading: false })),
       }));
       if (
         shouldAutoResumeWorkflow &&

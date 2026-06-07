@@ -5,18 +5,23 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  Copy,
   FileDiff,
   FilePlus2,
   FileText,
   Globe,
   Loader2,
+  MessageSquareQuote,
   Pencil,
   Search,
+  Sparkles,
   TerminalSquare,
   Wrench,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { ExecutionSegment, ExecutionStep } from '@/types';
+import { useInlinePromptStore } from '@/stores/inlinePromptStore';
+import { useReferenceStore, type NewReference } from '@/stores/referenceStore';
 import { SmoothStreamingText } from './SmoothStreamingText';
 import { ExecutionCollapse } from './ExecutionCollapse';
 import { useExecutionDisclosure } from './useExecutionDisclosure';
@@ -339,38 +344,190 @@ function StepBlock({ step, last = false }: { step: ExecutionStep; last?: boolean
   const open = disclosure.expanded;
   const subject = primarySubject(step);
   const tone = step.status === 'failed' ? 'error' : step.status === 'running' || step.status === 'retrying' ? 'running' : 'neutral';
+  const addReference = useReferenceStore((state) => state.addReference);
+  const openPrompt = useInlinePromptStore((state) => state.openPrompt);
+  const fullText = [
+    step.title,
+    subject,
+    step.inputPreview,
+    step.content,
+    step.outputPreview,
+    step.error,
+    step.metadata ? compactJson(step.metadata) : '',
+  ].filter(Boolean).join('\n\n');
+  const draft: NewReference = {
+    sourceType: stepKind(step) === 'thinking' ? 'chat' : 'artifact-block',
+    sourceId: step.id,
+    title: `${stepHeading(step)}${subject ? ` · ${subject}` : ''}`,
+    preview: fullText.slice(0, 4000),
+    location: {
+      blockId: step.id,
+      blockType: step.type,
+    },
+    payload: {
+      step,
+    },
+  };
 
   return (
     <TimelineShell icon={<StepIcon step={step} />} last={last} tone={tone}>
       <div className="space-y-1.5 pb-0.5">
-        <button
-          type="button"
-          className={cn(
-            'group flex max-w-full items-center gap-2 text-left text-[14px] font-medium transition-colors duration-200',
-            step.status === 'failed' ? 'text-error' : 'text-foreground-muted hover:text-foreground',
-          )}
-          onClick={() => hasDetails && disclosure.toggle()}
-        >
-          <span
-            className="execution-title min-w-0 truncate"
-            data-motion={disclosure.titleMotion}
-            data-tone={disclosure.tone}
-            data-kind={kind}
+        <div className="group flex max-w-full items-center gap-2">
+          <button
+            type="button"
+            className={cn(
+              'flex min-w-0 items-center gap-2 text-left text-[14px] font-medium transition-colors duration-200',
+              step.status === 'failed' ? 'text-error' : 'text-foreground-muted hover:text-foreground',
+            )}
+            onClick={() => hasDetails && disclosure.toggle()}
           >
-            <SmoothStreamingText text={stepHeading(step)} active={step.status === 'running' || step.status === 'retrying'} />
-            {subject ? <span className="ml-1 text-foreground-subtle">{subject}</span> : null}
-          </span>
+            <span
+              className="execution-title min-w-0 truncate"
+              data-motion={disclosure.titleMotion}
+              data-tone={disclosure.tone}
+              data-kind={kind}
+            >
+              <SmoothStreamingText text={stepHeading(step)} active={step.status === 'running' || step.status === 'retrying'} />
+              {subject ? <span className="ml-1 text-foreground-subtle">{subject}</span> : null}
+            </span>
+            {hasDetails && (
+              <span className="rounded-md p-0.5 text-foreground-subtle transition-colors group-hover:bg-white/5 group-hover:text-foreground">
+                {open ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
+              </span>
+            )}
+          </button>
           {hasDetails && (
-            <span className="rounded-md p-0.5 text-foreground-subtle transition-colors group-hover:bg-white/5 group-hover:text-foreground">
-              {open ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
+            <span className="ml-1 flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100" data-quote-card="execution-step">
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  addReference(draft);
+                }}
+                className="rounded p-0.5 text-foreground-subtle hover:bg-white/5 hover:text-foreground"
+                title="引用完整步骤"
+              >
+                <MessageSquareQuote className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  openPrompt(draft, { left: Math.max(16, window.innerWidth / 2 - 170), top: Math.max(16, window.innerHeight - 250) });
+                }}
+                className="rounded p-0.5 text-foreground-subtle hover:bg-white/5 hover:text-[#e0a072]"
+                title="询问 AI"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void navigator.clipboard?.writeText(fullText).catch(() => {});
+                }}
+                className="rounded p-0.5 text-foreground-subtle hover:bg-white/5 hover:text-foreground"
+                title="复制完整步骤"
+              >
+                <Copy className="h-3.5 w-3.5" />
+              </button>
             </span>
           )}
-        </button>
+        </div>
         {hasDetails && (
           <ExecutionCollapse open={open}>
             <StepDetails step={step} />
           </ExecutionCollapse>
         )}
+      </div>
+    </TimelineShell>
+  );
+}
+
+function isNoisyResearchFailure(step: ExecutionStep) {
+  const toolName = String(step.toolName || step.metadata?.toolName || '');
+  return (
+    step.status === 'failed' &&
+    (step.type === 'research' ||
+      step.type === 'web_fetch' ||
+      step.type === 'web_search' ||
+      toolName === 'deep_research' ||
+      toolName === 'research_fetch' ||
+      toolName === 'research_search' ||
+      toolName === 'web_fetch')
+  );
+}
+
+function failureLabel(step: ExecutionStep) {
+  return String(step.toolName || step.metadata?.toolName || step.type || 'research');
+}
+
+function failureMessage(step: ExecutionStep) {
+  return String(step.error || step.outputPreview || '抓取或正文提取失败');
+}
+
+function ResearchFailureAggregate({ steps, last = false }: { steps: ExecutionStep[]; last?: boolean }) {
+  const disclosure = useExecutionDisclosure({
+    id: `research-failures-${steps.map((step) => step.id).join('-')}`,
+    status: 'completed',
+    defaultCollapsed: true,
+    terminalStatuses: ['completed'],
+  });
+  const byTool = steps.reduce<Record<string, number>>((acc, step) => {
+    const key = failureLabel(step);
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+  const retryable = steps.filter((step) => /retry|timeout|http|extract|text/i.test(failureMessage(step))).length;
+
+  return (
+    <TimelineShell icon={<AlertTriangle className="h-4 w-4" />} last={last} tone="neutral">
+      <div className="space-y-1.5 pb-0.5">
+        <button
+          type="button"
+          className="group flex max-w-full items-center gap-2 text-left text-[14px] font-medium text-[#b8933e] transition-colors duration-200 hover:text-[#d3b66e]"
+          onClick={() => disclosure.toggle()}
+        >
+          <span className="execution-title min-w-0 truncate" data-motion={disclosure.titleMotion} data-tone="neutral" data-kind="research">
+            抓取网页完成
+            <span className="ml-1 text-foreground-subtle">
+              失败 {steps.length} · 可重试 {retryable}
+            </span>
+          </span>
+          <span className="rounded-md p-0.5 text-foreground-subtle transition-colors group-hover:bg-white/5 group-hover:text-foreground">
+            {disclosure.expanded ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
+          </span>
+        </button>
+        <ExecutionCollapse open={disclosure.expanded}>
+          <CodePanel tone="neutral">
+            <div className="border-b border-white/5 px-3 py-2 text-sm text-foreground-muted">
+              Research failures were grouped to avoid retry noise.
+            </div>
+            <div className="max-h-[320px] overflow-auto px-3 py-3 text-sm leading-6">
+              <div className="mb-3 flex flex-wrap gap-1.5">
+                {Object.entries(byTool).map(([name, count]) => (
+                  <span key={name} className="rounded-md bg-white/[0.045] px-2 py-1 font-mono-code text-[11px] text-[#9a9590]">
+                    {name} × {count}
+                  </span>
+                ))}
+              </div>
+              <div className="space-y-2">
+                {steps.map((step, index) => (
+                  <div key={step.id} className="rounded-md bg-black/20 px-2.5 py-2">
+                    <div className="flex gap-2 text-xs text-[#9a9590]">
+                      <span className="w-7 shrink-0 font-mono-code text-[#5c5855]">#{index + 1}</span>
+                      <span className="min-w-0 truncate font-mono-code">{failureLabel(step)}</span>
+                    </div>
+                    {primarySubject(step) && (
+                      <div className="mt-1 break-words text-xs text-foreground-muted">{primarySubject(step)}</div>
+                    )}
+                    <div className="mt-1 whitespace-pre-wrap break-words text-xs text-[#c97a76]">{failureMessage(step)}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </CodePanel>
+        </ExecutionCollapse>
       </div>
     </TimelineShell>
   );
@@ -412,6 +569,14 @@ export function ExecutionSegmentCard({ segment }: ExecutionSegmentCardProps) {
         duration ? `耗时 ${duration}` : '',
       ].filter(Boolean),
     [duration, segment.totalTokens],
+  );
+  const noisyFailures = useMemo(
+    () => segment.steps.filter(isNoisyResearchFailure),
+    [segment.steps],
+  );
+  const visibleSteps = useMemo(
+    () => segment.steps.filter((step) => !isNoisyResearchFailure(step)),
+    [segment.steps],
   );
 
   return (
@@ -471,8 +636,11 @@ export function ExecutionSegmentCard({ segment }: ExecutionSegmentCardProps) {
               </div>
             </TimelineShell>
           ))}
-          {segment.steps.map((step, index) => (
-            <StepBlock key={step.id} step={step} last={index === segment.steps.length - 1} />
+          {noisyFailures.length > 0 && (
+            <ResearchFailureAggregate steps={noisyFailures} last={visibleSteps.length === 0} />
+          )}
+          {visibleSteps.map((step, index) => (
+            <StepBlock key={step.id} step={step} last={index === visibleSteps.length - 1} />
           ))}
           {segment.status !== 'running' && segment.steps.length > 1 && (
             <div className="pl-9">

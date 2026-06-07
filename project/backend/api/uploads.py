@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -57,6 +57,7 @@ class UploadBatchResponse(BaseModel):
 async def upload_files(
     conversation_id: str,
     files: list[UploadFile] = File(...),
+    workspace_id: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -67,6 +68,7 @@ async def upload_files(
         files: List of files to upload.
     """
     service = get_upload_service()
+    storage_id = workspace_id or conversation_id
 
     uploaded: list[dict[str, Any]] = []
     failed: list[dict[str, Any]] = []
@@ -92,7 +94,7 @@ async def upload_files(
         try:
             mime_type = upload_file.content_type or "application/octet-stream"
             result = await service.upload_file(
-                conversation_id=conversation_id,
+                conversation_id=storage_id,
                 file_name=upload_file.filename or "unnamed",
                 file_data=file_data,
                 mime_type=mime_type,
@@ -110,7 +112,7 @@ async def upload_files(
                 from context.workspace_context import get_workspace_context
 
                 get_workspace_context().touch_file(
-                    conversation_id,
+                    storage_id,
                     result.workspace_path,
                     source="upload",
                 )
@@ -121,6 +123,7 @@ async def upload_files(
                 f"Uploaded file: {result.original_name}",
                 extra={
                     "conversation_id": conversation_id,
+                    "workspace_id": storage_id,
                     "file_id": result.file_id,
                     "size": result.size,
                 },

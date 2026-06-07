@@ -34,6 +34,14 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from core.logging import get_logger
+from context.minimal_context import (
+    MAX_CONTEXT_TOKENS,
+    THINKING_RETENTION_TURNS,
+    ContextLimitExceededError,
+    consume_expansion_build,
+    estimate_tokens,
+    format_tool_result_for_context,
+)
 
 logger = get_logger(__name__)
 
@@ -58,6 +66,7 @@ class ContextState:
         self.cycle_briefing_text: str = ""
         self.workspace_refs_text: str = ""
         self.workspace_status_text: str = ""
+        self.vccs_context_text: str = ""
         self.tool_defs_text: str = ""
         self.current_query: str = ""
         self.warnings: list[str] = []
@@ -136,14 +145,13 @@ class BuiltContext(BaseModel):
 class ContextBuilder:
     """Builds the complete model context from multiple sources.
 
-    Implements the Context OS v2 assembly pipeline:
+    Implements the minimal context assembly pipeline:
         1. resolve_model_capability(model_id)
         2. select_context_profile(profile_name, model)
-        3. scale_profile_for_model(profile, model)   # adaptive scaling
-        4. calculate_token_budget(profile, model)    # component budgets
-        5. Assemble blocks in fixed order
-        6. Budget check -> compression if needed
-        7. Return BuiltContext
+        3. Assemble blocks in fixed order
+        4. Keep the full immutable conversation history
+        5. Reduce only tool-result views
+        6. Reject requests above the fixed 256k limit
 
     Message immutability:
         - We only APPEND to the messages list.
@@ -183,10 +191,10 @@ class ContextBuilder:
 
         Pipeline:
             1. Resolve model capability
-            2. Select and scale context profile
-            3. Calculate token budget
+            2. Select context profile
+            3. Calculate token usage
             4. Build each context block
-            5. Check budget, apply compression if needed
+            5. Reject context above the fixed limit
             6. Assemble final messages and return BuiltContext
 
         Args:
@@ -252,13 +260,20 @@ class ContextBuilder:
         workspace_status_tokens = self._estimate_tokens(workspace_status_text)
         budget.add_usage(workspace_status_tokens)
 
+        vccs_context_text = await self._build_vccs_context(conversation_id)
+        ctx.vccs_context_text = vccs_context_text
+        vccs_tokens = self._estimate_tokens(vccs_context_text)
+        budget.add_usage(vccs_tokens)
+
         # 4e: Tool Definitions (alphabetically sorted for cache stability)
         tool_defs = self._fetch_tool_definitions()
         tool_defs.sort(key=lambda t: t.get("name", ""))  # Stable alphabetical order
         ctx.tools = tool_defs
         tool_defs_text = self._format_tool_definitions(tool_defs)
         ctx.tool_defs_text = tool_defs_text
-        tool_tokens = self._estimate_tokens(tool_defs_text)
+        tool_tokens = self._estimate_tokens(
+            json.dumps(tool_defs, ensure_ascii=False, default=str)
+        )
         budget.add_usage(tool_tokens)
 
         # 4f: Recent Messages (Sacred Window — append-only)
@@ -269,23 +284,21 @@ class ContextBuilder:
             if self._get_msg_content(recent_messages[-1]).strip() == user_query.strip():
                 recent_messages = recent_messages[:-1]
         ctx.messages = recent_messages
-        msg_tokens = sum(
-            self._estimate_tokens(self._get_msg_content(m))
-            for m in recent_messages
-        )
+        msg_tokens = sum(self._estimate_message_tokens(m) for m in recent_messages)
         budget.add_usage(msg_tokens)
 
         # 4g: Current Query
         query_tokens = self._estimate_tokens(user_query)
         budget.add_usage(query_tokens)
 
-        # Step 5: Budget check & compression
+        # Step 5: Fixed-limit check. No message compression is performed.
         components: dict[str, int] = {
             "system_prompt": sys_tokens,
             "user_memory": mem_tokens,
             "cycle_briefing": brief_tokens,
             "workspace_refs": ws_tokens,
             "workspace_status": workspace_status_tokens,
+            "context_memory_map": vccs_tokens,
             "tool_definitions": tool_tokens,
             "recent_messages": msg_tokens,
             "current_query": query_tokens,
@@ -293,39 +306,6 @@ class ContextBuilder:
 
         budget_status = budget.check_budget()
         warnings: list[str] = []
-
-        if budget_status.needs_compression:
-            logger.info(
-                "Token budget exceeded threshold, applying compression",
-                extra={
-                    "conversation_id": conversation_id,
-                    "usage_ratio": round(budget_status.usage_ratio, 3),
-                    "compression_level": budget_status.compression_level,
-                    "used_tokens": budget.used_tokens,
-                    "available_budget": budget.available_input_budget,
-                },
-            )
-
-            from context.compression_engine import CompressionEngine
-
-            engine = CompressionEngine()
-            compression_result = await engine.compress(ctx, profile, budget)
-            warnings.extend(compression_result.get("warnings", []))
-
-            # Update components after compression
-            if compression_result.get("cycle_advanced"):
-                warnings.append("Cycle advancement applied")
-
-            # Recalculate token counts after compression
-            msg_tokens = sum(
-                self._estimate_tokens(self._get_msg_content(m))
-                for m in ctx.messages
-            )
-            components["recent_messages"] = msg_tokens
-            components["tool_results"] = sum(
-                self._estimate_tokens(tr.get("content", ""))
-                for tr in ctx.tool_results
-            )
 
         # Step 6: Final assembly
         # System prompt: deduplicate via hash
@@ -335,6 +315,7 @@ class ContextBuilder:
             cycle_briefing=briefing_text,
             workspace_refs=ws_refs_text,
             workspace_status=workspace_status_text,
+            context_memory=vccs_context_text,
         )
         sys_hash = self._compute_hash(full_system)
 
@@ -358,8 +339,10 @@ class ContextBuilder:
             self._estimate_tokens(full_system)
             + components["recent_messages"]
             + components["current_query"]
-            + components.get("tool_results", 0)
+            + components["tool_definitions"]
         )
+        if total_tokens > MAX_CONTEXT_TOKENS:
+            raise ContextLimitExceededError(total_tokens)
 
         # Ensure tools are in stable alphabetical order
         tools_for_model = [{"type": "function", "function": t} for t in ctx.tools]
@@ -371,14 +354,25 @@ class ContextBuilder:
             "conversation_id": conversation_id,
             "profile": profile.name,
             "model_id": model_id,
-            "context_window": model.context_window,
+            "context_window": MAX_CONTEXT_TOKENS,
             "scaled": profile.name != profile_name,  # True if auto-scaling was applied
-            "compression_level": budget_status.compression_level,
+            "compression_level": "none",
             "build_time_ms": round(build_time_ms, 2),
             "message_count": len(final_messages),
             "sacred_window_messages": len(ctx.messages),
             "tool_count": len(tools_for_model),
             "usage_ratio": round(budget_status.usage_ratio, 4),
+            "context_memory": {
+                "active": bool(vccs_context_text.strip()),
+                "tokens": vccs_tokens,
+                "preview": "\n".join(
+                    line.strip()
+                    for line in vccs_context_text.splitlines()
+                    if line.strip()
+                )[:900],
+                "policy": "raw_preserved_tool_results_head_key_tail",
+                "thinking_retention_turns": THINKING_RETENTION_TURNS,
+            },
         }
 
         logger.info(
@@ -388,7 +382,7 @@ class ContextBuilder:
                 "total_tokens": total_tokens,
                 "model_id": model_id,
                 "profile": profile.name,
-                "compression_level": budget_status.compression_level,
+                "compression_level": "none",
                 "build_time_ms": round(build_time_ms, 2),
             },
         )
@@ -417,12 +411,10 @@ class ContextBuilder:
         return resolve_model_capability(model_id)
 
     def _select_profile(self, profile_name: str, model):
-        """Select profile and apply model-aware auto-scaling."""
-        from context.context_profile import get_profile, scale_profile_for_model
+        """Select a profile without model-aware trimming or compression."""
+        from context.context_profile import get_profile
 
-        profile = get_profile(profile_name)
-        scaled = scale_profile_for_model(profile, model)
-        return scaled
+        return get_profile(profile_name)
 
     # ===================================================================
     # System Prompt (hash-deduplicated)
@@ -460,11 +452,40 @@ class ContextBuilder:
                 "",
                 "## Context Budget",
                 f"- Profile: {profile.name}",
-                f"- Model: {model.model_id} (ctx: {model.context_window:,})",
-                f"- Max input tokens: {profile.max_input_tokens:,}",
-                f"- Recent turns kept: {profile.recent_turns}",
-                f"- Tool result mode: {profile.tool_result_mode}",
-                f"- Memory recall: top {profile.memory_top_k}",
+                f"- Model: {model.model_id} (fixed ctx: {MAX_CONTEXT_TOKENS:,})",
+                f"- Max input tokens: {MAX_CONTEXT_TOKENS:,}",
+                "- Conversation messages are not compressed or summarized.",
+                f"- Thinking is retained for the latest {THINKING_RETENTION_TURNS} assistant turns.",
+                "- Tool results are compressed by default as: head + selected key sections + tail.",
+                "- The key sections are chosen from errors, evidence, summaries, paths, URLs, headings, citations, and query-relevant paragraphs.",
+                "- The Context Memory Map is a structured recall map, not the full source text.",
+                "- Use context_map before broad recall when you need to know what can be recalled.",
+                "- Use custom_context_recall for exact tool results, chat messages, files, file ranges, grep results, shell output, diffs, constraints, plans, or artifacts.",
+                "- Use focus_tool_results to expand specific stored outputs by id, tool name, status, latest count, or grep/query text.",
+                "- Use expand_tool_result only when one exact complete stored result is required.",
+                "- Use recall_maximum or CRAZY_for_tool_results only at synthesis/audit/debug moments when broad stored evidence should be visible for a short window.",
+                "- Expansion windows expire after their configured context-build count; renew them only when full recall remains necessary.",
+                "",
+                "## Context Compression Awareness",
+                "- Compressed summaries and indexes are maps. They do not replace raw source text.",
+                "- Do not pretend you have read hidden raw content. Do not cite compressed summaries as sources.",
+                "- Before code edits, recall exact file content or relevant file ranges.",
+                "- Before final reports or factual claims, recall original evidence and source URLs.",
+                "- Before complex debugging, recall detailed logs, relevant code, and prior failed tool results.",
+                "",
+                "## Content-Type Recall Policy",
+                "- user_constraints: highest priority. Obey pinned constraints even if other history is compressed.",
+                "- tool_result_index: enough for orientation; recall exact output when details matter.",
+                "- code/file indexes: structure is useful, but exact code is mandatory before edits.",
+                "- shell/test/build summaries: enough for status; recall raw logs for root-cause analysis.",
+                "- decision_log/task_state: use as working memory, not as proof of raw user wording.",
+                "",
+                "## Phase-Based Recall",
+                "- Research phase: recall search evidence, source pages, browser snapshots, and research notes.",
+                "- Coding phase: recall file reads, diffs, errors, shell outputs, and active files.",
+                "- Validation phase: recall test results, build logs, and validation artifacts.",
+                "- Writing/report phase: recall all supporting evidence; consider recall_maximum.",
+                "- Delivery phase: recall user constraints and validation results.",
             ]
         )
         prompt = f"{prompt}\n{budget_guide}"
@@ -598,6 +619,16 @@ class ContextBuilder:
             logger.debug(f"Workspace status build failed: {e}")
             return ""
 
+    async def _build_vccs_context(self, conversation_id: str) -> str:
+        """Build a compact recall-aware memory map for the system prompt."""
+        try:
+            from context.context_memory import build_vccs_context
+
+            return await build_vccs_context(conversation_id)
+        except Exception as e:
+            logger.warning(f"Context memory map build failed: {e}")
+            return ""
+
     def _fetch_tool_definitions(self) -> list[dict[str, Any]]:
         """Fetch active tool definitions.
 
@@ -645,53 +676,117 @@ class ContextBuilder:
         return "\n".join(lines)
 
     async def _fetch_recent_messages(self, conversation_id: str, profile) -> list[dict[str, Any]]:
-        """Fetch recent messages (Sacred Window) for a conversation.
+        """Fetch the complete immutable conversation history.
 
-        These messages are returned as-is and are NEVER modified in-place.
-        Only the newest messages beyond the sacred window may be dropped
-        during cycle advancement.
+        User and assistant messages are never dropped or rewritten. Thinking
+        content is attached only to the latest five assistant turns. Historical
+        tool calls are reconstructed from their database records, with full
+        results preserved in storage and a bounded head/tail view sent to the
+        model unless the model requested a temporary expansion.
 
         Args:
             conversation_id: Conversation ID.
-            profile: ContextProfile with recent_turns and min_recent_messages.
+            profile: Retained for API compatibility; it does not trim history.
 
         Returns:
-            List of message dicts (immutable — never modify in-place).
+            List of model-facing message dictionaries.
         """
         try:
             import uuid as _uuid
             from sqlalchemy import select
 
-            from db.models import Message as MessageModel
+            from db.models import Message as MessageModel, ToolCall
             from db.session import get_session_maker
 
             conv_uuid = _uuid.UUID(conversation_id)
-            limit = max(
-                int(getattr(profile, "min_recent_messages", 6) or 6),
-                int(getattr(profile, "recent_turns", 16) or 16) * 2,
-            )
             session_maker = get_session_maker()
             async with session_maker() as db:
-                q = (
+                message_query = (
                     select(MessageModel)
                     .where(MessageModel.conversation_id == conv_uuid)
                     .order_by(MessageModel.created_at.asc())
                 )
-                rows = list((await db.execute(q)).scalars().all())[-limit:]
+                tool_query = (
+                    select(ToolCall)
+                    .where(ToolCall.conversation_id == conv_uuid)
+                    .order_by(ToolCall.created_at.asc())
+                )
+                message_rows = list((await db.execute(message_query)).scalars().all())
+                tool_rows = list((await db.execute(tool_query)).scalars().all())
 
-            messages: list[dict[str, Any]] = []
-            for row in rows:
+            assistant_rows = [row for row in message_rows if row.role == "assistant"]
+            thinking_ids = {
+                row.id for row in assistant_rows[-THINKING_RETENTION_TURNS:]
+            }
+
+            events: list[tuple[Any, int, list[dict[str, Any]]]] = []
+            for row in message_rows:
                 if row.role not in {"system", "user", "assistant"}:
                     continue
                 content = self._extract_message_text(row.content)
-                if not content:
-                    continue
-                messages.append(
-                    {
-                        "role": row.role,
-                        "content": content,
-                    }
+                thinking_content = (
+                    row.thinking_content
+                    if row.role == "assistant" and row.id in thinking_ids
+                    else None
                 )
+                if not content and not thinking_content:
+                    continue
+                message: dict[str, Any] = {"role": row.role, "content": content or None}
+                if thinking_content:
+                    message["thinking_content"] = thinking_content
+                events.append((row.created_at, 1, [message]))
+
+            for row in tool_rows:
+                result_id = str(row.id)
+                tool_name = str(row.tool_name)
+                content = format_tool_result_for_context(
+                    row.result if row.result is not None else {"error": "No result stored"},
+                    conversation_id=conversation_id,
+                    tool_name=tool_name,
+                    tool_result_id=result_id,
+                )
+                call_id = f"history_{result_id}"
+                tool_messages = [
+                    {
+                        "role": "assistant",
+                        "content": None,
+                        "thinking_content": "Historical tool call restored from conversation history.",
+                        "tool_calls": [
+                            {
+                                "id": call_id,
+                                "type": "function",
+                                "function": {
+                                    "name": tool_name,
+                                    "arguments": json.dumps(
+                                        row.arguments or {},
+                                        ensure_ascii=False,
+                                        default=str,
+                                    ),
+                                },
+                            }
+                        ],
+                    },
+                    {
+                        "role": "tool",
+                        "tool_call_id": call_id,
+                        "content": content,
+                    },
+                ]
+                events.append((row.created_at, 0, tool_messages))
+
+            events.sort(key=lambda event: (event[0], event[1]))
+            messages = [
+                message
+                for _, _, event_messages in events
+                for message in event_messages
+            ]
+            consume_expansion_build(conversation_id)
+            try:
+                from context.context_memory import consume_context_recall_turn
+
+                consume_context_recall_turn(conversation_id)
+            except Exception:
+                pass
             return messages
         except Exception as e:
             logger.warning(f"Recent messages fetch failed: {e}")
@@ -730,6 +825,7 @@ class ContextBuilder:
         cycle_briefing: str,
         workspace_refs: str,
         workspace_status: str = "",
+        context_memory: str = "",
     ) -> str:
         """Assemble the complete system prompt from all blocks.
 
@@ -756,6 +852,9 @@ class ContextBuilder:
         if workspace_status:
             parts.extend(["", workspace_status])
 
+        if context_memory:
+            parts.extend(["", "## Context Memory Map", context_memory])
+
         return "\n".join(parts)
 
     # ===================================================================
@@ -775,6 +874,21 @@ class ContextBuilder:
         if not text:
             return 0
         return max(1, len(str(text)) // 4)
+
+    @staticmethod
+    def _estimate_message_tokens(msg: dict[str, Any]) -> int:
+        """Estimate all model-facing fields of one message."""
+        if not isinstance(msg, dict):
+            return estimate_tokens(str(msg))
+        return estimate_tokens(
+            {
+                "role": msg.get("role"),
+                "content": msg.get("content"),
+                "thinking_content": msg.get("thinking_content"),
+                "tool_calls": msg.get("tool_calls"),
+                "tool_call_id": msg.get("tool_call_id"),
+            }
+        )
 
     @staticmethod
     def _get_msg_content(msg: dict[str, Any]) -> str:
@@ -811,12 +925,73 @@ class ContextBuilder:
                 continue
             if block.get("type") == "text" and block.get("text"):
                 texts.append(str(block.get("text")))
+            elif block.get("type") == "files" and isinstance(block.get("files"), list):
+                for file in block["files"]:
+                    if not isinstance(file, dict):
+                        continue
+                    name = file.get("originalName") or file.get("title") or file.get("workspacePath") or "file"
+                    path = file.get("workspacePath") or file.get("uri") or ""
+                    mime = file.get("mime_type") or file.get("mimeType") or "unknown"
+                    status = file.get("status") or ""
+                    texts.append(
+                        "\n".join(
+                            part
+                            for part in [
+                                "[用户上传文件 / User uploaded file]",
+                                f"name: {name}",
+                                f"path: {path}",
+                                f"mime: {mime}",
+                                f"status: {status}",
+                                "Do not assume contents. Use read_file, shell_command, ipython, or document-aware tools to inspect it when needed.",
+                            ]
+                            if part
+                        )
+                    )
+            elif block.get("type") == "references" and isinstance(block.get("references"), list):
+                for ref in block["references"]:
+                    if not isinstance(ref, dict):
+                        continue
+                    title = ref.get("title") or ref.get("sourceType") or "reference"
+                    stype = ref.get("sourceType") or ""
+                    instruction = str(ref.get("instruction") or "").strip()
+                    preview = str(ref.get("preview") or "").strip()
+                    loc = ref.get("location") if isinstance(ref.get("location"), dict) else {}
+                    loc_text = json.dumps(loc, ensure_ascii=False, default=str) if loc else ""
+                    texts.append(
+                        "\n".join(
+                            part
+                            for part in [
+                                "[用户引用 / User selected reference]",
+                                f"type: {stype}",
+                                f"title: {title}",
+                                f"location: {loc_text}" if loc_text else "",
+                                f"instruction: {instruction}" if instruction else "",
+                                preview,
+                            ]
+                            if part
+                        )
+                    )
             elif block.get("type") == "segments" and isinstance(block.get("segments"), list):
                 for segment in block["segments"]:
                     if not isinstance(segment, dict):
                         continue
                     if segment.get("type") == "text" and segment.get("content"):
                         texts.append(str(segment.get("content")))
+                    elif segment.get("type") == "artifact" and isinstance(segment.get("artifact"), dict):
+                        artifact = segment["artifact"]
+                        texts.append(
+                            "\n".join(
+                                part
+                                for part in [
+                                    "[Agent 交付产物 / Agent artifact]",
+                                    f"title: {artifact.get('title') or artifact.get('path') or 'artifact'}",
+                                    f"path: {artifact.get('path') or ''}",
+                                    f"workspace: {artifact.get('workspaceId') or artifact.get('workspace_id') or ''}",
+                                    f"description: {artifact.get('description') or ''}",
+                                ]
+                                if part
+                            )
+                        )
         return "\n".join(text for text in texts if text.strip()).strip()
 
 

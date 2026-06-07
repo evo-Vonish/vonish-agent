@@ -9,27 +9,29 @@ from context.workspace_context import make_resource_uri, parse_resource_uri
 
 
 def test_cheap_profile():
-    """Test cheap profile has expected values."""
+    """Compatibility profiles use the fixed minimal context policy."""
     profile = get_profile("cheap")
-    assert profile.max_input_tokens == 32000
-    assert profile.recent_turns == 6
-    assert profile.tool_result_mode == "summary"
+    assert profile.max_input_tokens == 256000
+    assert profile.recent_turns == 5
+    assert profile.tool_result_mode == "hybrid"
+    assert profile.enable_cycle_advance is False
 
 
 def test_balanced_profile():
-    """Test balanced profile has expected values."""
+    """Balanced no longer enables compression or history trimming."""
     profile = get_profile("balanced")
-    assert profile.max_input_tokens == 96000
-    assert profile.recent_turns == 16
+    assert profile.max_input_tokens == 256000
+    assert profile.recent_turns == 5
     assert profile.tool_result_mode == "hybrid"
+    assert profile.compression_level == "minimal"
 
 
 def test_max_profile():
-    """Test max profile has expected values."""
+    """Max maps to the same fixed policy as all compatibility profiles."""
     profile = get_profile("max")
     assert profile.max_input_tokens == 256000
-    assert profile.recent_turns == 50
-    assert profile.tool_result_mode == "verbose"
+    assert profile.recent_turns == 5
+    assert profile.tool_result_mode == "hybrid"
 
 
 def test_model_scaling_64k():

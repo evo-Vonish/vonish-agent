@@ -1,0 +1,158 @@
+# DOCX Validation Gates — 验证门槛
+
+validators:
+  # === P0: 安全门（不通过禁止交付）===
+  P0:
+    - id: "V0_1"
+      name: "文件可打开"
+      check: "WordprocessingDocument能打开生成的.docx"
+      tool: "OpenXML SDK"
+      fail_action: "BUILD_FAILED_REGENERATE"
+      
+    - id: "V0_2"
+      name: "Schema验证通过"
+      check: "OpenXML schema validation无错误"
+      tool: "./scripts/docx build内置验证"
+      fail_action: "BUILD_FAILED_REGENERATE"
+      
+    - id: "V0_3"
+      name: "RunFonts顺序正确"
+      check: "RunProperties中RunFonts是第一个子元素"
+      tool: "代码审查"
+      fail_action: "CODE_FIX_REORDER"
+      
+    - id: "V0_4"
+      name: "表格宽度匹配"
+      check: "GridColumn宽度与TableCellWidth匹配"
+      tool: "代码审查"
+      fail_action: "CODE_FIX_WIDTHS"
+      
+    - id: "V0_5"
+      name: "图片嵌入成功"
+      check: "build输出images > 0"
+      tool: "build output"
+      fail_action: "CODE_FIX_IMAGE_PATH"
+      
+    - id: "V0_6"
+      name: "无占位符文本"
+      check: "文档中无[TODO]/[Company Name]/Lorem ipsum"
+      tool: "文本扫描"
+      fail_action: "CONTENT_FIX_PLACEHOLDERS"
+
+  # === P1: 用户契约（不通过需向用户说明）===
+  P1:
+    - id: "V1_1"
+      name: "输出格式正确"
+      check: "文件扩展名为.docx"
+      tool: "文件系统"
+      fail_action: "RENAME_FILE"
+      
+    - id: "V1_2"
+      name: "内容符合Plan"
+      check: "所有required sections已包含"
+      tool: "对比artifact_plan"
+      fail_action: "ADD_MISSING_SECTIONS"
+      
+    - id: "V1_3"
+      name: "语言一致"
+      check: "所有文本使用用户请求的语言"
+      tool: "语言检测"
+      fail_action: "TRANSLATE_CONTENT"
+
+  # === P2: 质量标准（尽量满足，失败说明原因）===
+  P2:
+    - id: "V2_1"
+      name: "封面有视觉设计"
+      check: "封面有非纯白背景/渐变/几何/图片"
+      tool: "视觉检查"
+      fail_action: "GENERATE_COVER_BG"
+      weight: "high"
+      
+    - id: "V2_2"
+      name: "配色使用预设方案"
+      check: "颜色来自design_tokens.yaml"
+      tool: "颜色提取对比"
+      fail_action: "SWAP_TO_PRESET_PALETTE"
+      weight: "high"
+      
+    - id: "V2_3"
+      name: "页眉页脚完整"
+      check: "有页眉和页码"
+      tool: "结构检查"
+      fail_action: "ADD_HEADER_FOOTER"
+      weight: "medium"
+      
+    - id: "V2_4"
+      name: "目录可更新"
+      check: "UpdateFieldsOnOpen=true"
+      tool: "Settings检查"
+      fail_action: "ENABLE_AUTO_UPDATE"
+      weight: "medium"
+      
+    - id: "V2_5"
+      name: "首行缩进"
+      check: "中文正文FirstLine=480"
+      tool: "样式检查"
+      fail_action: "SET_FIRST_LINE_INDENT"
+      weight: "medium"
+
+  # === P3: 风格偏好（不阻塞交付）===
+  P3:
+    - id: "V3_1"
+      name: "封面标题字间距"
+      check: "Spacing.Val >= 40"
+      tool: "属性检查"
+      fail_action: "INCREASE_SPACING"
+      
+    - id: "V3_2"
+      name: "表格交替行"
+      check: "使用交替行颜色"
+      tool: "表格样式检查"
+      fail_action: "ENABLE_ALT_ROWS"
+
+# === 验证执行流程 ===
+execution_flow:
+  order: ["P0", "P1", "P2", "P3"]
+  
+  P0_policy:
+    all_must_pass: true
+    if_fail: "STOP_DELIVER_FIX_FIRST"
+    
+  P1_policy:
+    all_must_pass: true
+    if_fail: "WARN_USER_CONTINUE_OR_FIX"
+    
+  P2_policy:
+    min_pass_ratio: 0.8
+    if_fail: "SUGGEST_IMPROVEMENTS"
+    
+  P3_policy:
+    min_pass_ratio: 0.0  # 不阻塞
+    if_fail: "NOTE_PREFERENCES"
+
+# === 验证门定义 ===
+validation_gates:
+  VG1:
+    name: "Build验证门"
+    description: "编译+生成+OpenXML验证"
+    steps:
+      - "./scripts/docx build"
+    must_pass: ["V0_1", "V0_2", "V0_3", "V0_4"]
+    
+  VG2:
+    name: "内容验证门"
+    description: "内容完整性和质量"
+    steps:
+      - "文本扫描"
+      - "视觉检查"
+    must_pass: ["V0_5", "V0_6", "V1_1", "V1_2"]
+    
+  VG3:
+    name: "交付验证门"
+    description: "最终交付前检查"
+    steps:
+      - "P0全检"
+      - "P1全检"
+      - "P2统计"
+      - "P3统计"
+    must_pass: ["V0_1", "V0_2", "V0_6", "V1_1"]

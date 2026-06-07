@@ -112,7 +112,12 @@ def _context_policy(ext: str, text_length: int, is_image: bool) -> str:
 
 
 class UploadService:
-    """Validate, save, parse, and describe uploaded files."""
+    """Validate, save, and describe uploaded files.
+
+    Uploaded files are intentionally not parsed into model context here. The
+    agent receives file names and workspace paths, then decides which tool
+    should inspect the file.
+    """
 
     def __init__(self, upload_root: str | None = None) -> None:
         self.upload_root = Path(upload_root or settings.workspace_root)
@@ -175,28 +180,15 @@ class UploadService:
 
         workspace_path = str(file_path.relative_to(self.upload_root / conversation_id)).replace("\\", "/")
         resource_uri = f"resource://workspace/{workspace_path}"
-        is_image = ext in IMAGE_EXTENSIONS
         status = "uploaded"
-        text = ""
         text_preview = ""
         text_length = 0
         text_extracted = False
         error: str | None = None
-        metadata: dict[str, Any] = {"conversation_id": conversation_id}
-
-        if not is_image:
-            parser = get_file_parser()
-            parse_result = await parser.parse(str(file_path), detected_mime)
-            metadata.update(parse_result.metadata)
-            if parse_result.success and parse_result.text:
-                text = parse_result.text[:MAX_RAW_TEXT]
-                text_length = len(text)
-                text_preview = text[:500]
-                text_extracted = True
-                status = "parsed"
-            else:
-                status = "failed"
-                error = parse_result.error or "No text extracted."
+        metadata: dict[str, Any] = {
+            "conversation_id": conversation_id,
+            "parse_policy": "agent_tool_only",
+        }
 
         logger.info(
             "Uploaded file processed",
@@ -222,7 +214,7 @@ class UploadService:
             text_extracted=text_extracted,
             text_length=text_length,
             text_preview=text_preview,
-            context_policy="weak",
+            context_policy="none",
             resource_uri=resource_uri,
             metadata=metadata,
             error=error,

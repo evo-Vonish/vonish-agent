@@ -1,0 +1,144 @@
+# XLSX Procedure Graph — 可执行步骤图
+
+procedure:
+  name: "xlsx_creation"
+  description: "从Artifact Plan生成XLSX工作簿的完整流程"
+  
+  # === 入口 ===
+  entry:
+    condition: "用户请求创建Excel文件"
+    
+  # === 全局流程 ===
+  steps:
+    - id: "S1"
+      name: "读取Artifact Plan"
+      action: "read_artifact_plan"
+      recall_checkpoint: "CP1"
+      outputs: ["sections_for_xlsx", "visual_tokens", "validation_requirements"]
+      
+    - id: "S2"
+      name: "读取Design Tokens"
+      action: "read_file"
+      target: "design_tokens.yaml"
+      outputs: ["palette", "fonts", "layout", "col_widths"]
+      
+    - id: "S3"
+      name: "规划工作表结构"
+      action: "plan_sheets"
+      rules:
+        - "从artifact_plan筛选xlsx sections [P1]"
+        - "每个section对应一个工作表 [P2]"
+        - "封面页必须有 [P2]"
+      outputs: ["sheet_plan"]
+      
+    - id: "S4"
+      name: "逐Sheet创建"
+      action: "per_sheet_creation"
+      # 这是循环步骤，对每个sheet执行
+      loop:
+        - id: "S4a"
+          name: "规划Sheet结构"
+          action: "design_sheet"
+          outputs: ["cell_map", "formula_plan"]
+          
+        - id: "S4b"
+          name: "写入数据和公式"
+          action: "write_data"
+          tool: "ipython"
+          rules:
+            - "使用Excel公式，不用Python预计算 [P0]"
+            - "数字用数值格式，不用文本 [P0]"
+            - "隐藏网格线 [P2]"
+            - "从B2开始 [P2]"
+          outputs: ["written_sheet"]
+          
+        - id: "S4c"
+          name: "应用样式"
+          action: "apply_styles"
+          tool: "ipython"
+          rules:
+            - "表头深色背景+白字 [P2]"
+            - "交替行颜色 [P2]"
+            - "适当列宽 [P2]"
+          outputs: ["styled_sheet"]
+          
+        - id: "S4d"
+          name: "保存并验证"
+          action: "save_and_validate"
+          tool: "shell"
+          commands:
+            - "wb.save()"
+            - "./scripts/Xlsx recheck output.xlsx"
+            - "./scripts/Xlsx reference-check output.xlsx"
+          validation_gate: "VG_PER_SHEET"
+          
+        - id: "S4e"
+          name: "错误修复循环"
+          action: "fix_errors"
+          condition: "recheck或reference-check有错误"
+          loop: "修复→保存→重新检查，直到0 errors [P0]"
+      
+    - id: "S5"
+      name: "创建图表"
+      action: "create_charts"
+      recall_checkpoint: "CP3"
+      condition: "artifact_plan要求图表"
+      tool: "ipython"
+      rules:
+        - "使用openpyxl chart [P1]"
+        - "图表有标题和轴标签 [P2]"
+        - "系列色与palette一致 [P2]"
+      outputs: ["charts"]
+      
+    - id: "S6"
+      name: "最终验证"
+      action: "final_validation"
+      tool: "shell"
+      commands:
+        - "./scripts/Xlsx validate output.xlsx"
+        - "./scripts/Xlsx chart-verify output.xlsx"
+      validation_gate: "VG_FINAL"
+      
+    - id: "S7"
+      name: "视觉验收"
+      action: "visual_review"
+      recall_checkpoint: "CP5"
+      rules:
+        - "网格线已隐藏 [必须]"
+        - "表头深色+白字 [必须]"
+        - "交替行颜色 [必须]"
+        - "图表有标题 [必须]"
+      outputs: ["visual_review_passed"]
+      
+    - id: "S8"
+      name: "交付"
+      action: "deliver"
+      condition: "VG_FINAL PASSED AND visual_review_passed"
+      outputs: [".xlsx file"]
+
+# === Per-Sheet Validation Gate ===
+validation_gates:
+  VG_PER_SHEET:
+    name: "Sheet级验证"
+    description: "每个Sheet创建后立即验证"
+    checks:
+      - "recheck: 0 errors"
+      - "reference-check: 0 anomalies"
+    policy: "不通过不进入下一个Sheet [P0]"
+    
+  VG_FINAL:
+    name: "最终验证"
+    description: "所有Sheet完成后验证"
+    checks:
+      - "validate: exit code 0"
+      - "chart-verify: charts have data"
+    policy: "不通过不交付 [P0]"
+
+# === 循环步骤的依赖 ===
+dependencies:
+  S4b: [S4a]   # 写入依赖规划
+  S4c: [S4b]   # 样式依赖写入
+  S4d: [S4c]   # 验证依赖样式
+  S4e: [S4d]   # 修复依赖验证结果
+  S5: [S4]     # 图表依赖所有sheet完成
+  S6: [S5]     # 最终验证依赖图表

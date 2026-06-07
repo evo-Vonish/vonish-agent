@@ -159,28 +159,8 @@ class TokenBudget(BaseModel):
     def get_compression_level(
         self, ratio: float | None = None
     ) -> CompressionLevelName:
-        """Get compression level for current or given usage ratio.
-
-        Iterates through thresholds from lowest to highest and returns
-        the highest matched compression level.
-
-        Args:
-            ratio: Optional usage ratio (0.0 to 1.0+).
-                   If None, uses current usage ratio.
-
-        Returns:
-            Compression level string.
-        """
-        if ratio is None:
-            ratio = self.usage_ratio
-
-        level: CompressionLevelName = "none"
-        for threshold, threshold_level in THRESHOLDS:
-            if ratio >= threshold:
-                level = threshold_level
-            else:
-                break
-        return level
+        """Compression is disabled; over-budget callers must reject the request."""
+        return "none"
 
     def would_exceed(self, additional_tokens: int) -> bool:
         """Check if adding tokens would exceed budget.
@@ -441,39 +421,19 @@ def check_budget(total_tokens: int, max_tokens: int) -> BudgetStatus:
 
     ratio = total_tokens / max_tokens if max_tokens > 0 else 0.0
 
-    level: CompressionLevelName = "none"
-    for threshold, threshold_level in THRESHOLDS:
-        if ratio >= threshold:
-            level = threshold_level
-        else:
-            break
-
     return BudgetStatus(
         current_tokens=total_tokens,
         max_tokens=max_tokens,
         usage_ratio=ratio,
-        compression_level=level,
+        compression_level="none",
         is_over_budget=ratio >= 1.0,
         remaining_tokens=max(0, max_tokens - total_tokens),
     )
 
 
 def get_compression_level(usage_ratio: float) -> CompressionLevelName:
-    """Get compression level for a given usage ratio.
-
-    Args:
-        usage_ratio: Token usage ratio (0.0 to 1.0+).
-
-    Returns:
-        Compression level string.
-    """
-    level: CompressionLevelName = "none"
-    for threshold, threshold_level in THRESHOLDS:
-        if usage_ratio >= threshold:
-            level = threshold_level
-        else:
-            break
-    return level
+    """Compression is disabled."""
+    return "none"
 
 
 def get_compression_description(level: CompressionLevelName) -> str:

@@ -172,72 +172,70 @@ class ContextProfile(BaseModel):
 # Predefined Profiles (Context OS v2 defaults)
 # ---------------------------------------------------------------------------
 
-# Cheap: cost-sensitive, small models, aggressive compression
+# Profiles are retained for API compatibility. They all map to the same
+# non-compressing 256k context policy.
 CONTEXT_PROFILE_CHEAP = ContextProfile(
     name="cheap",
-    max_input_tokens=32000,
-    recent_turns=6,
-    memory_top_k=5,
-    workspace_chunk_top_k=3,
-    tool_result_mode="summary",
+    max_input_tokens=256000,
+    recent_turns=5,
+    memory_top_k=0,
+    workspace_chunk_top_k=0,
+    tool_result_mode="hybrid",
     multimodal_mode="caption_only",
-    compression_level="aggressive",
-    safety_margin_ratio=0.40,
-    output_reserve_tokens=4096,
-    max_tool_result_tokens=2000,
-    enable_cycle_advance=True,
-    min_recent_messages=4,
+    compression_level="minimal",
+    safety_margin_ratio=0.0,
+    output_reserve_tokens=0,
+    max_tool_result_tokens=4000,
+    enable_cycle_advance=False,
+    min_recent_messages=1,
 )
 
-# Balanced: default for most scenarios
 CONTEXT_PROFILE_BALANCED = ContextProfile(
     name="balanced",
-    max_input_tokens=96000,
-    recent_turns=16,
-    memory_top_k=12,
-    workspace_chunk_top_k=8,
+    max_input_tokens=256000,
+    recent_turns=5,
+    memory_top_k=0,
+    workspace_chunk_top_k=0,
     tool_result_mode="hybrid",
     multimodal_mode="caption_plus_refs",
-    compression_level="balanced",
-    safety_margin_ratio=0.35,
-    output_reserve_tokens=8192,
-    max_tool_result_tokens=8000,
-    enable_cycle_advance=True,
-    min_recent_messages=6,
+    compression_level="minimal",
+    safety_margin_ratio=0.0,
+    output_reserve_tokens=0,
+    max_tool_result_tokens=4000,
+    enable_cycle_advance=False,
+    min_recent_messages=1,
 )
 
-# Max: large models, rich context, minimal compression
 CONTEXT_PROFILE_MAX = ContextProfile(
     name="max",
     max_input_tokens=256000,
-    recent_turns=50,
-    memory_top_k=30,
-    workspace_chunk_top_k=20,
-    tool_result_mode="verbose",
+    recent_turns=5,
+    memory_top_k=0,
+    workspace_chunk_top_k=0,
+    tool_result_mode="hybrid",
     multimodal_mode="rich",
     compression_level="minimal",
-    safety_margin_ratio=0.25,
-    output_reserve_tokens=8192,
-    max_tool_result_tokens=20000,
-    enable_cycle_advance=True,
-    min_recent_messages=10,
+    safety_margin_ratio=0.0,
+    output_reserve_tokens=0,
+    max_tool_result_tokens=4000,
+    enable_cycle_advance=False,
+    min_recent_messages=1,
 )
 
-# Custom: defaults to balanced settings, user-modifiable
 CONTEXT_PROFILE_CUSTOM = ContextProfile(
     name="custom",
-    max_input_tokens=96000,
-    recent_turns=16,
-    memory_top_k=12,
-    workspace_chunk_top_k=8,
+    max_input_tokens=256000,
+    recent_turns=5,
+    memory_top_k=0,
+    workspace_chunk_top_k=0,
     tool_result_mode="hybrid",
     multimodal_mode="caption_plus_refs",
-    compression_level="balanced",
-    safety_margin_ratio=0.35,
-    output_reserve_tokens=8192,
-    max_tool_result_tokens=8000,
-    enable_cycle_advance=True,
-    min_recent_messages=6,
+    compression_level="minimal",
+    safety_margin_ratio=0.0,
+    output_reserve_tokens=0,
+    max_tool_result_tokens=4000,
+    enable_cycle_advance=False,
+    min_recent_messages=1,
 )
 
 CONTEXT_PROFILES: dict[str, ContextProfile] = {

@@ -268,18 +268,9 @@ async def compact_context(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> CompactResponse:
-    """Trigger compression on the context for a conversation.
-
-    Runs the five-phase compression pipeline to reduce token usage.
-    This is useful when approaching the context window limit.
-
-    Args:
-        conversation_id: Conversation ID.
-        profile_name: Context profile name.
-        model_id: Model identifier.
-    """
+    """Compatibility endpoint: automatic and manual compression are disabled."""
     logger.info(
-        "Compacting context",
+        "Ignoring context compaction request because compression is disabled",
         extra={
             "conversation_id": conversation_id,
             "profile": profile_name,
@@ -288,6 +279,18 @@ async def compact_context(
         },
     )
 
+    return CompactResponse(
+        status="disabled",
+        conversation_id=conversation_id,
+        compression_level="none",
+        tokens_saved=0,
+        warnings=[
+            "Context compression is disabled. Conversation history remains immutable; "
+            "new messages are rejected after the fixed 256k limit."
+        ],
+    )
+
+    # Kept below temporarily for source compatibility with older deployments.
     try:
         from context.model_capability import resolve_model_capability
         from context.context_profile import scale_profile_for_model

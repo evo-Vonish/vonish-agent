@@ -38,6 +38,14 @@ _tool_configs: dict[str, bool] = {
     "research_status": True,
     # Human Interaction
     "set_todo_list": True,
+    "expand_tool_result": True,
+    "CRAZY_for_tool_results": True,
+    "recall_maximum": True,
+    "focus_tool_results": True,
+    "context_map": True,
+    "custom_context_recall": True,
+    "pin_memory": True,
+    "unpin_memory": True,
     "ask_user_question": True,
     "request_approval": True,
 }

@@ -412,6 +412,62 @@ async def preview_workspace_file(
     }
 
 
+@router.get("/workspaces/{conversation_id}/document")
+async def document_preview(
+    conversation_id: str,
+    path: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Structured preview for PDF / DOCX / XLSX / PPTX (artifact renderers)."""
+    from services import document_preview as dp
+
+    target = _safe_workspace_child(conversation_id, path)
+    if not target.is_file():
+        return dp.error("FILE_NOT_FOUND", f"File not found: {path}", recoverable=False)
+    ext = target.suffix.lower()
+    try:
+        if ext == ".pdf":
+            return dp.preview_pdf(target)
+        if ext == ".docx":
+            return dp.preview_docx(target)
+        if ext == ".xlsx":
+            return dp.preview_xlsx(target)
+        if ext == ".pptx":
+            return dp.preview_pptx(target)
+        return dp.error("UNSUPPORTED_DOCUMENT", f"No structured preview for {ext or 'file'}", recoverable=False)
+    except Exception as exc:
+        logger.error(f"Document preview failed for {path}: {exc}")
+        return dp.error(
+            "OFFICE_PREVIEW_FAILED",
+            f"Could not convert preview: {exc}",
+            recoverable=True,
+            suggested_action="fallback_to_text_extract",
+        )
+
+
+@router.get("/workspaces/{conversation_id}/document/page")
+async def document_page(
+    conversation_id: str,
+    path: str,
+    page: int = 0,
+    scale: float = 1.5,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Render a single PDF page to a PNG data URL on demand."""
+    from services import document_preview as dp
+
+    target = _safe_workspace_child(conversation_id, path)
+    if not target.is_file():
+        return dp.error("FILE_NOT_FOUND", f"File not found: {path}", recoverable=False)
+    try:
+        return dp.render_pdf_page(target, page, scale)
+    except Exception as exc:
+        logger.error(f"PDF page render failed for {path} p{page}: {exc}")
+        return dp.error("PDF_RENDER_FAILED", f"Could not render page: {exc}", recoverable=True)
+
+
 @router.get("/workspaces/{conversation_id}/files/{path:path}")
 async def read_workspace_file(
     conversation_id: str,

@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import html
 import json
+import mimetypes
 import re
 import sys
 import time
@@ -198,13 +199,7 @@ class ToolExecutor:
             result_success = not (
                 isinstance(result, dict) and result.get("success") is False
             )
-            result_error = (
-                str(result.get("error") or result.get("error_message"))
-                if isinstance(result, dict)
-                and result.get("success") is False
-                and (result.get("error") or result.get("error_message"))
-                else None
-            )
+            result_error = self._extract_tool_error(result)
 
             return ToolCallResult(
                 tool_name=request.tool_name,
@@ -315,6 +310,7 @@ class ToolExecutor:
             "research_fetch": self._handle_research_fetch,
             "deep_research": self._handle_deep_research,
             "research_status": self._handle_research_status,
+            "open_artifact": self._handle_open_artifact,
             "delete_file": self._handle_delete_file,
             "apply_patch": self._handle_apply_patch,
             "list_directory": self._handle_list_directory,
@@ -324,11 +320,35 @@ class ToolExecutor:
             "git_status": self._handle_git_status,
             "git_diff": self._handle_git_diff,
             "git_history": self._handle_git_history,
+            "expand_tool_result": self._handle_expand_tool_result,
+            "CRAZY_for_tool_results": self._handle_crazy_for_tool_results,
+            "recall_maximum": self._handle_recall_maximum,
+            "focus_tool_results": self._handle_focus_tool_results,
+            "context_map": self._handle_context_map,
+            "custom_context_recall": self._handle_custom_context_recall,
+            "pin_memory": self._handle_pin_memory,
+            "unpin_memory": self._handle_unpin_memory,
             "set_todo_list": self._handle_set_todo_list,
             "ask_user_question": self._handle_ask_user_question,
             "request_approval": self._handle_request_approval,
         }
         return default_handlers.get(tool_name)
+
+    @staticmethod
+    def _extract_tool_error(result: Any) -> str | None:
+        """Extract a readable error from a failed structured tool payload."""
+        if not isinstance(result, dict) or result.get("success") is not False:
+            return None
+        for key in ("error", "error_message", "message", "stderr", "stdout", "hint"):
+            value = result.get(key)
+            if value:
+                text = str(value).strip()
+                if text:
+                    return text[:2000]
+        exit_code = result.get("exit_code")
+        if exit_code is not None:
+            return f"Tool exited with code {exit_code}."
+        return "Tool reported success=false but did not provide an error message."
 
     @staticmethod
     def _full_access(permission_mode: str = "default", directory_access_mode: str = "locked_workspace") -> bool:
@@ -561,7 +581,58 @@ class ToolExecutor:
         payload = result.to_tool_response()
         payload["cwd"] = str(self._workspace_dir(conversation_id, workspace_id))
         payload["session_mode"] = mode
+        if not payload.get("success") and payload.get("error_name") == "SecurityViolation":
+            payload["guidance"] = (
+                "Python sandbox blocked this code under locked workspace permissions. "
+                "For network/ssl/subprocess work, use web_fetch/research_fetch/shell_command, "
+                "or switch directory access to full access if the user explicitly allows it."
+            )
         return payload
+
+    async def _handle_open_artifact(
+        self,
+        path: str,
+        title: str = "",
+        description: str = "",
+        conversation_id: str = "",
+        workspace_id: str | None = None,
+        permission_mode: str = "default",
+        directory_access_mode: str = "locked_workspace",
+        **_: Any,
+    ) -> dict[str, Any]:
+        """Ask the frontend to open a workspace artifact in the Workbench."""
+        ws = self._workspace_dir(conversation_id, workspace_id)
+        allow_escape = self._full_access(permission_mode, directory_access_mode)
+        raw_path = Path(str(path or "").strip())
+        if not str(path or "").strip():
+            return {"success": False, "error": "path is required"}
+        fp = raw_path.resolve() if allow_escape and raw_path.is_absolute() else (ws / raw_path).resolve()
+        if not allow_escape and not str(fp).startswith(str(ws)):
+            return {"success": False, "path": path, "error": "Path escape blocked"}
+        if not fp.exists() or not fp.is_file():
+            return {"success": False, "path": path, "error": "Artifact file does not exist"}
+
+        rel_path = str(fp.relative_to(ws)).replace("\\", "/") if str(fp).startswith(str(ws)) else str(fp)
+        mime_type, _ = mimetypes.guess_type(str(fp))
+        stat = fp.stat()
+        artifact = {
+            "id": f"artifact_{conversation_id}_{rel_path}".replace("\\", "/"),
+            "title": title or fp.name,
+            "path": rel_path,
+            "workspaceId": workspace_id or conversation_id,
+            "mimeType": mime_type or "application/octet-stream",
+            "size": stat.st_size,
+            "description": description,
+        }
+        return {
+            "success": True,
+            "open_artifact": True,
+            "artifact": artifact,
+            "guidance": (
+                "The artifact has been handed to the frontend Workbench. Tell the user what to inspect "
+                "and invite targeted edits using selections/references."
+            ),
+        }
 
     async def _handle_web_fetch(
         self,
@@ -775,8 +846,19 @@ class ToolExecutor:
         from tools.research_runtime_client import HollowSearchCoreClient, ResearchRuntimeError
 
         try:
-            health = await HollowSearchCoreClient().ensure_ready()
-            return {"success": True, "status": health}
+            client = HollowSearchCoreClient()
+            health = await client.ensure_ready()
+            pipeline = await client.pipeline_health()
+            pipeline_ok = all(
+                bool(pipeline.get(key))
+                for key in ("service_alive", "search_ok", "fetch_ok", "extract_ok", "result_store_ok")
+            )
+            return {
+                "success": True,
+                "status": "ok" if pipeline_ok else "degraded",
+                "health": health,
+                "pipeline": pipeline,
+            }
         except ResearchRuntimeError as error:
             return {"success": False, "error": error.to_dict()}
 
@@ -1116,6 +1198,356 @@ class ToolExecutor:
             line_end=line_end,
             limit=limit,
         )
+
+    # ── Tool Result Expansion ─────────────────────────────────────────
+
+    async def _handle_expand_tool_result(
+        self,
+        tool_result_id: str = "",
+        tool_name: str = "",
+        builds: int = 3,
+        conversation_id: str = "",
+        **_: Any,
+    ) -> dict[str, Any]:
+        """Return one complete stored tool result and open a 3-build window."""
+        import uuid as _uuid
+
+        from sqlalchemy import select
+
+        from context.minimal_context import (
+            TOOL_RESULT_EXPANSION_BUILDS,
+            mark_tool_result_expanded,
+        )
+        from db.models import ToolCall
+        from db.session import get_session_maker
+
+        if not conversation_id:
+            return {"success": False, "error": "conversation_id is required"}
+        if not tool_result_id and not tool_name:
+            return {"success": False, "error": "Provide tool_result_id or tool_name."}
+
+        if tool_result_id.startswith("research_"):
+            from context.minimal_context import (
+                TOOL_RESULT_EXPANSION_BUILDS,
+                mark_tool_result_expanded,
+            )
+            from tools.research_runtime_client import get_research_result_store
+
+            stored = get_research_result_store().get(tool_result_id)
+            if stored is None:
+                return {
+                    "success": False,
+                    "error": f"Stored research content not found: {tool_result_id}",
+                    "hint": "The reference may be from an older backend process or another conversation.",
+                }
+            mark_tool_result_expanded(
+                conversation_id,
+                tool_result_id,
+                builds=builds or TOOL_RESULT_EXPANSION_BUILDS,
+            )
+            return {
+                "success": True,
+                "tool_result_id": tool_result_id,
+                "content_ref": tool_result_id,
+                "tool_name": "research_content",
+                "expanded_for_context_builds": builds or TOOL_RESULT_EXPANSION_BUILDS,
+                "url": stored.url,
+                "title": stored.title,
+                "content_hash": stored.content_hash,
+                "content": stored.content,
+                "metadata": stored.metadata,
+            }
+
+        try:
+            conv_uuid = _uuid.UUID(conversation_id)
+        except ValueError:
+            return {"success": False, "error": "Invalid conversation_id"}
+
+        session_maker = get_session_maker()
+        async with session_maker() as db:
+            query = select(ToolCall).where(ToolCall.conversation_id == conv_uuid)
+            if tool_result_id:
+                normalized_id = tool_result_id.removeprefix("history_")
+                try:
+                    result_uuid = _uuid.UUID(normalized_id)
+                except ValueError:
+                    return {"success": False, "error": f"Invalid tool_result_id: {tool_result_id}"}
+                query = query.where(ToolCall.id == result_uuid)
+            else:
+                query = query.where(ToolCall.tool_name == tool_name)
+            query = query.order_by(ToolCall.created_at.desc()).limit(1)
+            row = (await db.execute(query)).scalar_one_or_none()
+
+        if row is None:
+            target = tool_result_id or tool_name
+            return {"success": False, "error": f"Stored tool result not found: {target}"}
+
+        result_id = str(row.id)
+        mark_tool_result_expanded(
+            conversation_id,
+            result_id,
+            builds=builds or TOOL_RESULT_EXPANSION_BUILDS,
+        )
+        return {
+            "success": True,
+            "tool_result_id": result_id,
+            "tool_name": row.tool_name,
+            "expanded_for_context_builds": builds or TOOL_RESULT_EXPANSION_BUILDS,
+            "content": row.result,
+        }
+
+    async def _handle_crazy_for_tool_results(
+        self,
+        builds: int = 2,
+        reason: str = "",
+        conversation_id: str = "",
+        **_: Any,
+    ) -> dict[str, Any]:
+        """Expand every tool result for upcoming context builds."""
+        if not conversation_id:
+            return {"success": False, "error": "conversation_id is required"}
+        from context.minimal_context import expansion_state, mark_all_tool_results_expanded
+
+        safe_builds = max(1, min(int(builds or 2), 8))
+        mark_all_tool_results_expanded(conversation_id, safe_builds)
+        return {
+            "success": True,
+            "mode": "all_tool_results",
+            "expanded_for_context_builds": safe_builds,
+            "reason": reason,
+            "guidance": (
+                "All stored tool results will be full in upcoming context builds. "
+                "Use this for final report synthesis or broad evidence review, then continue directly."
+            ),
+            "state": expansion_state(conversation_id),
+        }
+
+    async def _handle_recall_maximum(
+        self,
+        turns: int = 3,
+        scope: str = "current_task",
+        maxTokens: int | None = None,
+        priority: list[str] | None = None,
+        includeRaw: bool = False,
+        includeKeySegments: bool = True,
+        query: str = "",
+        reason: str = "",
+        conversation_id: str = "",
+        **_: Any,
+    ) -> dict[str, Any]:
+        """Activate a broad recall window and return the current context map."""
+        if not conversation_id:
+            return {"success": False, "error": "conversation_id is required"}
+        from context.context_memory import build_context_map
+        from context.minimal_context import expansion_state, mark_all_tool_results_expanded, mark_tool_result_focus
+
+        safe_turns = max(1, min(int(turns or 3), 10))
+        safe_tokens = max(4_000, min(int(maxTokens or 80_000), 180_000))
+        if includeRaw or scope in {"research", "debugging", "coding", "artifact", "all_recent", "current_task"}:
+            if query:
+                mark_tool_result_focus(conversation_id, query=query, builds=safe_turns)
+            else:
+                mark_all_tool_results_expanded(conversation_id, safe_turns)
+        context_map = await build_context_map(conversation_id, scope=scope)
+        return {
+            "success": True,
+            "status": "active",
+            "scope": scope,
+            "turnsRemaining": safe_turns,
+            "maxTokens": safe_tokens,
+            "priority": priority or [
+                "user_constraints",
+                "tool_results",
+                "research_evidence",
+                "file_reads",
+                "diffs",
+                "errors",
+                "plans",
+                "chat_messages",
+            ],
+            "includeRaw": bool(includeRaw),
+            "includeKeySegments": bool(includeKeySegments),
+            "query": query,
+            "reason": reason,
+            "contextMap": context_map,
+            "toolResultExpansionState": expansion_state(conversation_id),
+            "guidance": (
+                "MAX recall is active for upcoming context builds. Use the map to target exact recalls; "
+                "do not assume compressed summaries are raw source text."
+            ),
+        }
+
+    async def _handle_focus_tool_results(
+        self,
+        tool_result_ids: list[str] | None = None,
+        tool_names: list[str] | None = None,
+        query: str = "",
+        status: str = "any",
+        latest: int = 5,
+        builds: int = 3,
+        conversation_id: str = "",
+        **_: Any,
+    ) -> dict[str, Any]:
+        """Expand matching tool results by id, name, query, status, and recency."""
+        if not conversation_id:
+            return {"success": False, "error": "conversation_id is required"}
+
+        import uuid as _uuid
+        from sqlalchemy import select
+
+        from context.minimal_context import (
+            expansion_state,
+            mark_tool_result_focus,
+            serialize_tool_result,
+        )
+        from db.models import ToolCall
+        from db.session import get_session_maker
+
+        try:
+            conv_uuid = _uuid.UUID(conversation_id)
+        except ValueError:
+            return {"success": False, "error": "Invalid conversation_id"}
+
+        safe_builds = max(1, min(int(builds or 3), 12))
+        safe_latest = max(0, min(int(latest or 0), 50))
+        requested_ids = [str(item).removeprefix("history_") for item in (tool_result_ids or []) if item]
+        names = [str(item) for item in (tool_names or []) if item]
+        status_filter = status if status in {"completed", "failed"} else "any"
+        query_text = str(query or "").strip()
+
+        matches: list[dict[str, Any]] = []
+        matched_ids: list[str] = []
+        session_maker = get_session_maker()
+        async with session_maker() as db:
+            db_query = select(ToolCall).where(ToolCall.conversation_id == conv_uuid)
+            if status_filter != "any":
+                db_query = db_query.where(ToolCall.status == status_filter)
+            if names:
+                db_query = db_query.where(ToolCall.tool_name.in_(names))
+            db_query = db_query.order_by(ToolCall.created_at.desc()).limit(max(safe_latest, len(requested_ids), 1) + 40)
+            rows = list((await db.execute(db_query)).scalars().all())
+
+        requested_set = set(requested_ids)
+        terms = [term.lower() for term in re.findall(r"[\w\u4e00-\u9fff]{2,}", query_text)[:12]]
+        for row in rows:
+            row_id = str(row.id)
+            serialized = serialize_tool_result(row.result if row.result is not None else {})
+            haystack = f"{row.tool_name}\n{row.arguments}\n{serialized}".lower()
+            id_match = row_id in requested_set
+            query_match = bool(terms) and all(term in haystack for term in terms[:8])
+            name_match = bool(names) and row.tool_name in names
+            recency_match = safe_latest > 0 and len(matches) < safe_latest and not requested_set and not terms and not names
+            if not (id_match or query_match or name_match or recency_match):
+                continue
+            matched_ids.append(row_id)
+            matches.append(
+                {
+                    "tool_result_id": row_id,
+                    "tool_name": row.tool_name,
+                    "status": row.status,
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                    "preview": serialized[:500],
+                }
+            )
+            if len(matches) >= max(safe_latest, len(requested_set), 1):
+                break
+
+        mark_tool_result_focus(
+            conversation_id,
+            tool_result_ids=matched_ids + requested_ids,
+            tool_names=names,
+            query=query_text,
+            builds=safe_builds,
+        )
+        return {
+            "success": True,
+            "mode": "focused_tool_results",
+            "expanded_for_context_builds": safe_builds,
+            "matched_count": len(matches),
+            "matches": matches,
+            "query": query_text,
+            "tool_names": names,
+            "state": expansion_state(conversation_id),
+            "guidance": (
+                "Matching tool results will be full in upcoming context builds. "
+                "Continue the current analysis/synthesis using those recalled details."
+            ),
+        }
+
+    async def _handle_context_map(
+        self,
+        scope: str = "all",
+        conversation_id: str = "",
+        **_: Any,
+    ) -> dict[str, Any]:
+        """Return a compact map of recallable conversation memory."""
+        if not conversation_id:
+            return {"success": False, "error": "conversation_id is required"}
+        from context.context_memory import build_context_map
+
+        return await build_context_map(conversation_id, scope=scope)
+
+    async def _handle_custom_context_recall(
+        self,
+        targets: list[dict[str, Any]] | None = None,
+        turns: int = 1,
+        maxTokens: int = 4000,
+        mode: str = "summary_plus_segments",
+        reason: str = "",
+        workspace_id: str = "current",
+        conversation_id: str = "",
+        **_: Any,
+    ) -> dict[str, Any]:
+        """Recall exact or structured content from messages, tools, files, or grep."""
+        if not conversation_id:
+            return {"success": False, "error": "conversation_id is required"}
+        from context.context_memory import custom_context_recall
+
+        resolved_workspace_id = self._resolve_tool_workspace_id(workspace_id, conversation_id)
+        return await custom_context_recall(
+            conversation_id=conversation_id,
+            workspace_id=resolved_workspace_id,
+            targets=targets or [],
+            turns=turns,
+            max_tokens=maxTokens,
+            mode=mode,
+            reason=reason,
+        )
+
+    async def _handle_pin_memory(
+        self,
+        target: dict[str, Any] | None = None,
+        reason: str = "",
+        expiresAfterTurns: int | None = None,
+        conversation_id: str = "",
+        **_: Any,
+    ) -> dict[str, Any]:
+        """Pin a constraint, file, decision, error, plan, or note into context memory."""
+        if not conversation_id:
+            return {"success": False, "error": "conversation_id is required"}
+        from context.context_memory import pin_memory
+
+        return await pin_memory(
+            conversation_id=conversation_id,
+            target=target or {},
+            reason=reason,
+            expires_after_turns=expiresAfterTurns,
+        )
+
+    async def _handle_unpin_memory(
+        self,
+        targetId: str = "",
+        conversation_id: str = "",
+        **_: Any,
+    ) -> dict[str, Any]:
+        """Deactivate one pinned memory item."""
+        if not conversation_id:
+            return {"success": False, "error": "conversation_id is required"}
+        if not targetId:
+            return {"success": False, "error": "targetId is required"}
+        from context.context_memory import unpin_memory
+
+        return await unpin_memory(conversation_id=conversation_id, target_id=targetId)
 
     # ── Set Todo List ─────────────────────────────────────────────────
 

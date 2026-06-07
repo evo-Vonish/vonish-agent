@@ -1,0 +1,104 @@
+# XLSX Design Tokens — 视觉设计令牌
+
+# === 配色方案 ===
+palettes:
+  # 极简风格（默认，非金融）
+  minimal:
+    bg_white: "FFFFFF"
+    bg_light_grey: "F5F5F5"
+    bg_row_alt: "F9F9F9"
+    header_black: "000000"
+    header_grey: "333333"
+    text_dark: "000000"
+    border_grey: "D0D0D0"
+    blue_primary: "0066CC"
+    blue_secondary: "4A90D9"
+    blue_light: "E6F0FA"
+    
+  # 金融风格
+  finance:
+    bg_light: "ECF0F1"
+    header_dark: "122B49"
+    accent_warm: "FFF3E0"
+    negative_red: "FF0000"
+    positive_green: "28A745"
+    chart_series: ["122B49", "274C77", "3B6796", "D9E2F3"]
+    
+  # 扩展配色（图表系列色）
+  ocean:
+    series: ["0E4A6B", "3A7CA5", "5BC0BE", "90E0EF", "CAF0F8"]
+    bg: "EDF6F9"
+    header: "0E4A6B"
+    
+  sunset:
+    series: ["C75146", "E8890C", "F4A261", "E9C46A", "F5DCC8"]
+    bg: "FFF5EB"
+    header: "C75146"
+    
+  forest:
+    series: ["2D6A4F", "40916C", "52B788", "74C69D", "B7E4C7"]
+    bg: "E8F5E9"
+    header: "2D6A4F"
+    
+  berry:
+    series: ["7B2D58", "A8578D", "D4A5C3", "E8C4DA", "F2D8EA"]
+    bg: "FCF0F6"
+    header: "7B2D58"
+
+# === 字体规范 ===
+fonts:
+  body: "Calibri"
+  body_size: 11
+  header_size: 11
+  title_size: 22
+  subtitle_size: 14
+
+# === 页面布局 ===
+layout:
+  start_cell: "B2"  # 内容起始单元格
+  margin_col_a: 3   # A列边距宽度
+  header_row_height: 28
+  data_row_height: 20
+  separator_row_height: 15
+  title_row_height: 45
+
+# === 列宽规范 ===
+column_widths:
+  margin: 3
+  date: 12
+  text: 20-40
+  numeric: 14-18
+  percentage: 12-14
+  currency: 16
+
+# === 地区颜色规范 ===
+regional_colors:
+  china:
+    up: "FF0000"     # 红涨
+    down: "00AA00"   # 绿跌
+  international:
+    up: "28A745"     # 绿涨
+    down: "DC3545"   # 红跌
+
+# === 条件格式规范 ===
+conditional_formats:
+  data_bar:
+    color: "4A90D9"
+    show_value: true
+    
+  color_scale_3:
+    start_color: "F8696B"  # 红
+    mid_color: "FFEB84"    # 黄
+    end_color: "63BE7B"    # 绿
+    
+  icon_set_3:
+    style: "3TrafficLights1"
+    type: "percent"
+    values: [0, 33, 67]
+
+# === 金融模型字体语义 ===
+finance_semantic_font:
+  blue: "固定值/输入值"
+  black: "计算公式"
+  green: "跨表引用"
+  red: "外部引用"

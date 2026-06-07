@@ -9,6 +9,11 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
-  server: { port: 5173, proxy: { '/api': { target: 'http://127.0.0.1:8000', changeOrigin: true } } },
+  server: {
+    host: '127.0.0.1',
+    port: 18473,
+    strictPort: true,
+    proxy: { '/api': { target: 'http://127.0.0.1:18480', changeOrigin: true } },
+  },
   build: { outDir: 'dist', sourcemap: true },
 })

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { cn } from '@/lib/utils';
 import { useChatStore } from '@/stores/chatStore';
 import { useI18n } from '@/i18n';
-import { Zap, FolderTree, Terminal, Search, GitBranch, Bug } from 'lucide-react';
+import { FolderTree, Terminal, Search, GitBranch, Bug } from 'lucide-react';
 
 // ── Typewriter Cycle ────────────────────────────────────────────────────
 
@@ -18,12 +18,12 @@ const PAUSE = 3500;       // ms pause after full phrase
 const DELETE_SPEED = 40;  // ms per char delete
 
 function useTypewriterCycle() {
-  const [text, setText] = useState('');
+  const [text, setText] = useState(PHRASES[1]);
   const [cursor, setCursor] = useState(true);
-  const phraseIdx = useRef(0);
-  const charIdx = useRef(0);
+  const phraseIdx = useRef(1);
+  const charIdx = useRef(PHRASES[1].length);
   const deleting = useRef(false);
-  const paused = useRef(false);
+  const paused = useRef(true);
 
   // Blinking cursor
   useEffect(() => {
@@ -127,19 +127,16 @@ export function WelcomeScreen() {
   }, []);
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center overflow-y-auto px-4">
-      <div className={cn(
-        'text-center space-y-8 max-w-2xl w-full transition-opacity duration-700',
-        visible ? 'opacity-100' : 'opacity-0'
-      )}>
-        {/* Logo */}
-        <div className="w-12 h-12 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center mx-auto">
-          <Zap className="w-6 h-6 text-primary" />
-        </div>
-
-        {/* Typewriter title */}
-        <div className="h-20 flex items-center justify-center">
-          <h1 className="text-[56px] font-bold text-foreground leading-none tracking-tight">
+    <div className="flex-1 overflow-y-auto px-4 py-10">
+      <div
+        className={cn(
+          'message-stream-shell mx-auto flex min-h-full w-full flex-col justify-center transition-opacity duration-700',
+          visible ? 'opacity-100' : 'opacity-0',
+        )}
+      >
+        <div className="mb-10">
+          <div className="mb-3 font-mono-code text-[11px] uppercase tracking-[0.18em] text-[#5c5855]">VonishAgent</div>
+          <h1 className="min-h-[48px] text-[38px] font-semibold leading-tight text-[#e8e6e3]">
             {text}
             <span
               className={cn(
@@ -150,41 +147,40 @@ export function WelcomeScreen() {
               |
             </span>
           </h1>
+          <p className="mt-2 max-w-xl text-[13px] leading-6 text-[#9a9590]">
+            选择一个任务开始，或直接在下方输入。所有工具、Workspace、上下文和模型配置都会走真实后端。
+          </p>
         </div>
 
-        {/* Task prompts */}
-        <div className={cn(
-          'grid gap-2 w-full transition-all duration-500 delay-300',
-          visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
-        )}>
-          <p className="text-[11px] text-foreground-subtle uppercase tracking-wider text-center mb-1">
+        <div
+          className={cn(
+            'grid w-full gap-2 transition-all delay-300 duration-500',
+            visible ? 'translate-y-0 opacity-100' : 'translate-y-4 opacity-0',
+          )}
+        >
+          <p className="mb-1 font-mono-code text-[11px] uppercase tracking-[0.12em] text-[#5c5855]">
             {t('chat.try')}
           </p>
           {TASKS.map((task) => (
             <button
               key={task.title}
               onClick={() => sendMessage(task.prompt)}
-              className="w-full flex items-start gap-3 px-4 py-3 rounded-xl bg-surface border border-border hover:border-primary/30 hover:bg-surface-hover transition-all group text-left"
+              className="group flex w-full items-start gap-3 rounded-md border border-white/[0.055] bg-white/[0.028] px-4 py-3 text-left transition-all hover:border-primary/30 hover:bg-white/[0.055]"
             >
-              <div className="w-8 h-8 rounded-lg bg-background border border-border flex items-center justify-center flex-shrink-0 mt-0.5 group-hover:border-primary/20 transition-colors">
-                <task.icon className="w-4 h-4 text-foreground-muted group-hover:text-primary transition-colors" />
+              <div className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md border border-white/[0.06] bg-black/20 transition-colors group-hover:border-primary/25">
+                <task.icon className="h-4 w-4 text-[#9a9590] transition-colors group-hover:text-primary" />
               </div>
               <div className="min-w-0">
-                <div className="text-sm font-medium text-foreground group-hover:text-foreground transition-colors">
+                <div className="text-sm font-medium text-[#e8e6e3]">
                   {task.title}
                 </div>
-                <div className="text-xs text-foreground-subtle mt-0.5 line-clamp-1">
+                <div className="mt-0.5 line-clamp-1 text-xs text-[#5c5855]">
                   {task.desc}
                 </div>
               </div>
             </button>
           ))}
         </div>
-
-        {/* Footer hint */}
-        <p className="text-[10px] text-foreground-subtle">
-          Type a message or pick a task above
-        </p>
       </div>
     </div>
   );

@@ -196,7 +196,11 @@ class ModelAdapter(ABC):
         )
         return StreamChunk(
             type="done",
-            content={"error": message[:2000]},
+            content={
+                "error": message[:2000],
+                "code": f"{provider.upper()}_HTTP_{response.status_code}".replace(" ", "_"),
+                "status": response.status_code,
+            },
             usage=None,
         )
 
@@ -279,8 +283,10 @@ class DeepSeekAdapter(ModelAdapter):
 
             if msg.tool_calls:
                 api_msg["tool_calls"] = msg.tool_calls
-                if enable_thinking and msg.role == "assistant":
-                    api_msg["reasoning_content"] = msg.thinking_content or "Tool calls prepared."
+            if enable_thinking and msg.role == "assistant" and msg.thinking_content:
+                api_msg["reasoning_content"] = msg.thinking_content
+            elif msg.role == "assistant" and msg.tool_calls:
+                api_msg["reasoning_content"] = "Tool calls prepared."
             if msg.tool_call_id:
                 api_msg["tool_call_id"] = msg.tool_call_id
 
@@ -597,6 +603,10 @@ class KimiAdapter(ModelAdapter):
 
             if msg.tool_calls:
                 api_msg["tool_calls"] = msg.tool_calls
+            if enable_thinking and msg.role == "assistant" and msg.thinking_content:
+                api_msg["reasoning_content"] = msg.thinking_content
+            elif msg.role == "assistant" and msg.tool_calls:
+                api_msg["reasoning_content"] = "Tool calls prepared."
             if msg.tool_call_id:
                 api_msg["tool_call_id"] = msg.tool_call_id
 

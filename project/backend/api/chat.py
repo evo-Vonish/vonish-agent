@@ -48,6 +48,9 @@ class ChatStreamRequest(BaseModel):
     resources: list[dict[str, Any]] = Field(
         default_factory=list, description="Attached resource references"
     )
+    references: list[dict[str, Any]] = Field(
+        default_factory=list, description="User-selected workbench references"
+    )
 
 
 class StopRequest(BaseModel):
@@ -61,6 +64,48 @@ class ThinkingSummaryRequest(BaseModel):
 
     content: str = Field(..., description="Thinking content to summarize", min_length=1)
     model: str = Field(default="deepseek-v4-pro", description="Model to use")
+
+
+def _format_references(refs: list[dict[str, Any]]) -> str:
+    """Render user-selected workbench references into a text block for the model context."""
+    if not refs:
+        return ""
+    lines = ["[用户选中的工作对象 / User-selected references]"]
+    loc_keys = (
+        "filePath", "lineStart", "lineEnd", "pageIndex", "sheetName",
+        "cellRange", "slideIndex", "blockId", "blockType", "elementId", "cssPath",
+    )
+    for idx, ref in enumerate(refs, 1):
+        title = str(ref.get("title") or ref.get("sourceType") or "reference")
+        stype = str(ref.get("sourceType") or "")
+        loc = ref.get("location") if isinstance(ref.get("location"), dict) else {}
+        bits = [f"{k}={loc.get(k)}" for k in loc_keys if loc and loc.get(k) not in (None, "")]
+        header = f"{idx}. ({stype}) {title}"
+        if bits:
+            header += "  [" + ", ".join(bits) + "]"
+        lines.append(header)
+        instruction = ref.get("instruction")
+        if instruction:
+            lines.append(f"   指令/instruction: {instruction}")
+        preview = str(ref.get("preview") or "").strip()
+        if preview:
+            snippet = preview if len(preview) <= 4000 else preview[:4000] + "…"
+            lines.append("   ---")
+            for pline in (snippet.splitlines() or [snippet]):
+                lines.append("   " + pline)
+            lines.append("   ---")
+        payload = ref.get("payload")
+        if payload is not None:
+            try:
+                import json as _json
+
+                payload_text = _json.dumps(payload, ensure_ascii=False, default=str)
+            except Exception:
+                payload_text = str(payload)
+            if payload_text.strip():
+                payload_text = payload_text[:3000] + ("…" if len(payload_text) > 3000 else "")
+                lines.append(f"   payload: {payload_text}")
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -124,9 +169,19 @@ async def chat_stream(
             resource["mime_type"] = resource.get("mimeType")
         resource_refs.append(resource)
 
+    references_in = [r for r in request.references if isinstance(r, dict)]
+    references_text = _format_references(references_in)
+    effective_message = request.message
+    if references_text:
+        effective_message = (
+            f"{request.message}\n\n{references_text}" if request.message.strip() else references_text
+        )
+
     user_content: list[dict[str, Any]] = [{"type": "text", "text": request.message}]
     if resource_refs:
         user_content.append({"type": "files", "files": resource_refs})
+    if references_in:
+        user_content.append({"type": "references", "references": references_in})
 
     if not request.internal_continue:
         user_msg = MessageModel(
@@ -498,6 +553,31 @@ async def chat_stream(
             }
         )
 
+    def _append_artifact_segment(data: dict[str, Any]) -> None:
+        artifact = data.get("artifact") if isinstance(data.get("artifact"), dict) else {}
+        if not artifact:
+            return
+        path = str(artifact.get("path") or "")
+        if not path:
+            return
+        assistant_segments.append(
+            {
+                "id": f"artifact-{data.get('call_id') or path}",
+                "type": "artifact",
+                "artifact": {
+                    "id": str(artifact.get("id") or path),
+                    "title": str(artifact.get("title") or path),
+                    "path": path,
+                    "workspaceId": artifact.get("workspaceId") or data.get("workspace_id"),
+                    "mimeType": artifact.get("mimeType") or artifact.get("mime_type"),
+                    "kind": artifact.get("kind"),
+                    "size": artifact.get("size"),
+                    "sourceToolCallId": artifact.get("sourceToolCallId") or data.get("call_id"),
+                    "description": artifact.get("description"),
+                },
+            }
+        )
+
     async def event_generator():
         """Generate SSE events from the agent loop and collect response."""
         nonlocal assistant_parts, thinking_parts
@@ -507,7 +587,7 @@ async def chat_stream(
             try:
                 async for produced in agent_loop.run(
                     conversation_id=conversation_id,
-                    user_input=request.message or "Please review the uploaded files.",
+                    user_input=effective_message or "Please review the referenced content.",
                     model_id=request.model,
                     enable_thinking=True,
                     api_key=api_config.api_key if api_config else None,
@@ -583,6 +663,8 @@ async def chat_stream(
                     _end_execution_step(event_data)
                 elif event_name == "workflow_error":
                     _append_workflow_error(event_data)
+                elif event_name == "artifact_open":
+                    _append_artifact_segment(event_data)
                 elif event_name == "thinking_start":
                     if active_execution_segment_id is None:
                         _append_thinking_delta("")

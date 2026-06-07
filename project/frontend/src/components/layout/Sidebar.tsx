@@ -29,6 +29,7 @@ import {
   type ExportConversationOptions,
 } from '@/services/api';
 import { WorkspacePanel } from '@/components/workspace/WorkspacePanel';
+import { Logo } from './Logo';
 
 interface SidebarProps {
   className?: string;
@@ -657,9 +658,16 @@ export function Sidebar({ className }: SidebarProps) {
   const sidebarBody = (
     <>
       <div className="flex items-center justify-between px-3 py-3">
-        <div>
-          <div className="text-[13px] font-semibold text-foreground">VonishAgent</div>
-          <div className="text-[11px] text-foreground-subtle">Workspace Console</div>
+        <div className="flex min-w-0 items-center gap-2.5">
+          <Logo size={22} />
+          <div className="min-w-0">
+            <div className="truncate font-mono-code text-[18px] font-bold tracking-[-0.03em] text-[#e8e6e3]">
+              VonishAgent
+            </div>
+            <div className="font-mono-code text-[11.5px] tracking-[0.02em] text-[#5c5855]">
+              Agent IDE
+            </div>
+          </div>
         </div>
         <Tooltip content="收起">
           <button className="rounded-lg p-1.5 text-foreground-muted hover:bg-white/[0.06] hover:text-foreground" onClick={toggleSidebar}>
@@ -879,7 +887,7 @@ export function Sidebar({ className }: SidebarProps) {
         {mobileSidebarOpen && (
           <>
             <div className="fixed inset-0 z-40 bg-black/55" onClick={() => setMobileSidebarOpen(false)} />
-            <aside className={cn('fixed bottom-0 left-0 top-0 z-50 flex w-[300px] flex-col border-r border-white/10 bg-[#111111]', className)}>
+            <aside className={cn('fixed bottom-0 left-0 top-0 z-50 flex w-[300px] flex-col border-r border-white/[0.06] bg-[#0e0e0f]/90 backdrop-blur-xl', className)}>
               {sidebarBody}
             </aside>
             {createProjectOpen && <CreateProjectModal onClose={() => setCreateProjectOpen(false)} onCreate={createProjectAndExpand} />}
@@ -893,7 +901,7 @@ export function Sidebar({ className }: SidebarProps) {
   if (!sidebarOpen) {
     return (
       <div className="relative flex-shrink-0" onMouseEnter={handleMouseEnter} onMouseLeave={handleMouseLeave}>
-        <div className={cn('flex h-full w-10 flex-col items-center gap-2 border-r border-white/8 bg-[#0f0f0f] py-3', className)}>
+        <div className={cn('flex h-full w-10 flex-col items-center gap-2 border-r border-white/[0.06] bg-[#0e0e0f]/80 py-3 backdrop-blur-xl', className)}>
           <button className="rounded-lg p-1.5 text-foreground-muted hover:bg-white/[0.07] hover:text-foreground" onClick={toggleSidebar}>
             <ChevronRight className="h-4 w-4" />
           </button>
@@ -903,7 +911,7 @@ export function Sidebar({ className }: SidebarProps) {
           </button>
         </div>
         {sidebarHoverOpen && (
-          <div className="absolute left-full top-2 z-40 ml-2 w-[240px] overflow-hidden rounded-2xl border border-white/10 bg-[#1d1d1d] shadow-2xl">
+          <div className="absolute left-full top-2 z-40 ml-2 w-[240px] overflow-hidden rounded-2xl border border-white/[0.08] bg-[#171718]/95 shadow-2xl backdrop-blur-xl">
             <div className="border-b border-white/8 px-3 py-2 text-xs font-medium text-foreground">最近对话</div>
             <div className="max-h-[360px] space-y-1 overflow-y-auto p-2">
               {conversations.slice(0, 8).map((conversation) => (
@@ -929,7 +937,7 @@ export function Sidebar({ className }: SidebarProps) {
 
   return (
     <aside
-      className={cn('relative flex flex-shrink-0 flex-col border-r border-white/8 bg-[#101010]', className)}
+      className={cn('relative flex flex-shrink-0 flex-col border-r border-white/[0.06] bg-[#0e0e0f]/82 backdrop-blur-xl', className)}
       style={{ width: sidebarWidth }}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}

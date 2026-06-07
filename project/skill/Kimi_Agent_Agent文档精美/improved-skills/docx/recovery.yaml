@@ -1,0 +1,152 @@
+# DOCX Recovery Playbook — 错误恢复手册
+
+recovery:
+  # === P0级错误恢复（必须修复）===
+  P0:
+    - error: "unexpected child element 'rFonts'"
+      validator: "V0_3"
+      cause: "RunProperties中RunFonts不是第一个子元素"
+      fix:
+        - step: "定位所有RunProperties和StyleRunProperties"
+        - step: "将RunFonts移到第一个子元素位置"
+        - step: "重新编译"
+      prevention: "编写C#时使用辅助函数确保顺序"
+      
+    - error: "gridCol[0].w=2500 != tc[0].tcW=0"
+      validator: "V0_4"
+      cause: "TableCellWidth使用Auto类型"
+      fix:
+        - step: "将TableCellWidth从Auto改为Dxa"
+        - step: "显式设置Width值与GridColumn匹配"
+        - step: "重新编译"
+      prevention: "创建表格时使用统一列宽变量"
+      
+    - error: "File contains corrupted data"
+      validator: "V0_1"
+      cause: "同名文件已存在，OpenXML无法覆盖"
+      fix:
+        - step: "删除旧文件: rm -f output.docx"
+        - step: "重新运行build"
+      prevention: "build前检查并删除旧文件"
+      
+    - error: "build输出images = 0"
+      validator: "V0_5"
+      cause: "图片路径错误或图片未嵌入"
+      fix:
+        - step: "检查图片路径是否存在"
+        - step: "检查AddImage调用参数"
+        - step: "确保图片在Paragraph之前插入"
+        - step: "重新编译"
+      prevention: "添加图片前验证路径"
+      
+    - error: "检测到占位符文本"
+      validator: "V0_6"
+      cause: "模板内容未替换"
+      fix:
+        - step: "全文搜索[TODO]/[Company Name]/Lorem ipsum"
+        - step: "替换为实际内容"
+        - step: "重新编译"
+      prevention: "交付前运行文本扫描"
+
+  # === P1级错误恢复（需向用户说明）===
+  P1:
+    - error: "缺少用户要求的section"
+      validator: "V1_2"
+      cause: "artifact_plan执行不完整"
+      fix:
+        - step: "重新读取artifact_plan"
+        - step: "检查sections列表"
+        - step: "补充缺失section"
+      fallback: "如时间不足，向用户说明哪些section待补充"
+      
+    - error: "语言不一致"
+      validator: "V1_3"
+      cause: "混合使用多语言"
+      fix:
+        - step: "统一所有文本为用户请求语言"
+        - step: "专业术语保留原语言（需标注）"
+      fallback: "如混合是用户要求（如中英混合），保留"
+
+  # === P2级错误恢复（建议修复）===
+  P2:
+    - error: "封面纯文本无背景"
+      validator: "V2_1"
+      fix:
+        - step: "读取design_tokens.cover_styles"
+        - step: "选择匹配的风格生成背景"
+        - step: "重新插入封面背景"
+      
+    - error: "配色非预设方案"
+      validator: "V2_2"
+      fix:
+        - step: "从artifact_plan读取palette名称"
+        - step: "从design_tokens获取对应色值"
+        - step: "批量替换代码中的颜色"
+        - step: "重新编译"
+      
+    - error: "无页眉页脚"
+      validator: "V2_3"
+      fix:
+        - step: "添加HeaderPart和FooterPart"
+        - step: "在SectionProperties中添加引用"
+        - step: "重新编译"
+      
+    - error: "目录不可更新"
+      validator: "V2_4"
+      fix:
+        - step: "添加UpdateFieldsOnOpen { Val = true }"
+        - step: "重新编译"
+      
+    - error: "中文正文无首行缩进"
+      validator: "V2_5"
+      fix:
+        - step: "在Normal样式中添加FirstLine=480"
+        - step: "重新编译"
+
+  # === 通用恢复模式 ===
+  generic:
+    - name: "REGENERATE_FROM_SCRATCH"
+      description: "从头重新生成"
+      when: "P0错误无法快速定位或修复"
+      steps:
+        - "删除所有生成的临时文件"
+        - "回到S1步骤重新执行"
+        - "记录错误原因避免重复"
+        
+    - name: "CODE_FIX_REORDER"
+      description: "修复元素顺序"
+      when: "Schema验证失败（元素顺序）"
+      steps:
+        - "读取OpenXML Schema顺序要求"
+        - "调整代码中元素创建顺序"
+        - "重新编译验证"
+        
+    - name: "CODE_FIX_WIDTHS"
+      description: "修复表格宽度"
+      when: "表格列宽不匹配"
+      steps:
+        - "检查GridColumn宽度定义"
+        - "检查TableCellWidth定义"
+        - "统一为Dxa类型并匹配数值"
+        - "重新编译验证"
+        
+    - name: "CONTENT_FIX_PLACEHOLDERS"
+      description: "修复占位符"
+      when: "检测到占位符文本"
+      steps:
+        - "搜索所有占位符模式"
+        - "替换为实际内容或删除"
+        - "重新编译验证"
+
+  # === 恢复决策树 ===
+  decision_tree:
+    - if: "P0错误"
+      then: "必须修复，不修复不交付"
+    - if: "P1错误"
+      then: "优先修复，无法修复则向用户说明"
+    - if: "P2错误≥2个"
+      then: "建议修复，记录改进点"
+    - if: "P2错误<2个"
+      then: "可交付，注明待改进"
+    - if: "P3错误"
+      then: "不阻塞交付，作为建议"

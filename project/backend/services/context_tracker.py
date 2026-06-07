@@ -17,6 +17,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.logging import get_logger
+from context.minimal_context import (
+    MAX_CONTEXT_TOKENS,
+    format_tool_result_for_context,
+)
 
 logger = get_logger(__name__)
 
@@ -41,8 +45,8 @@ class ContextSnapshot:
     system_prompt_tokens: int = 0
 
     # Budget info (from profile + model capability)
-    max_input_tokens: int = 96000
-    context_window: int = 128000
+    max_input_tokens: int = MAX_CONTEXT_TOKENS
+    context_window: int = MAX_CONTEXT_TOKENS
     output_reserved: int = 8192
     safety_margin: int = 0
     available_budget: int = 0
@@ -209,7 +213,7 @@ class ContextTracker:
         try:
             from context.model_capability import resolve_model_capability
             model_cap = resolve_model_capability(model_id)
-            snapshot.context_window = model_cap.context_window
+            snapshot.context_window = MAX_CONTEXT_TOKENS
         except Exception:
             model_cap = None
             logger.debug(f"Could not resolve model capability for {model_id}")
@@ -221,13 +225,10 @@ class ContextTracker:
             if model_cap:
                 profile = scale_profile_for_model(profile, model_cap)
 
-            snapshot.max_input_tokens = profile.max_input_tokens
-            snapshot.output_reserved = profile.output_reserve_tokens
-            snapshot.safety_margin = int(
-                (model_cap.context_window if model_cap else 128000)
-                * profile.safety_margin_ratio
-            )
-            snapshot.available_budget = profile.max_input_tokens
+            snapshot.max_input_tokens = MAX_CONTEXT_TOKENS
+            snapshot.output_reserved = 0
+            snapshot.safety_margin = 0
+            snapshot.available_budget = MAX_CONTEXT_TOKENS
         except Exception as e:
             logger.warning(f"Could not resolve profile: {e}")
 
@@ -264,10 +265,8 @@ class ContextTracker:
             snapshot.usage_ratio = 0.0
 
         # Compression level from ratio
-        snapshot.compression_level = get_compression_level_for_ratio(
-            snapshot.usage_ratio
-        )
-        snapshot.budget_healthy = snapshot.usage_ratio < 0.70
+        snapshot.compression_level = "none"
+        snapshot.budget_healthy = snapshot.usage_ratio < 1.0
 
         # Component breakdown
         snapshot.components = {
@@ -366,16 +365,17 @@ class ContextTracker:
                 Message.role.in_(["user", "assistant"]),
             )
             .order_by(Message.created_at.desc())
-            .limit(50)  # Last 50 messages covers the sacred window
         )
         result = await db.execute(q)
         rows = result.all()
 
         total = 0
+        assistant_thinking_kept = 0
         for content, thinking in rows:
             total += estimate_content_tokens(content)
-            if thinking:
+            if thinking and assistant_thinking_kept < 5:
                 total += estimate_tokens(str(thinking))
+                assistant_thinking_kept += 1
 
         return total
 
@@ -388,28 +388,27 @@ class ContextTracker:
         from db.models import ToolCall
 
         q = (
-            select(ToolCall.result)
+            select(ToolCall.id, ToolCall.tool_name, ToolCall.result)
             .where(
                 ToolCall.conversation_id == conv_uuid,
                 ToolCall.status.in_(["completed", "failed"]),
             )
             .order_by(ToolCall.created_at.desc())
-            .limit(30)
         )
         result = await db.execute(q)
         rows = result.all()
 
         total = 0
-        for (res,) in rows:
+        for result_id, tool_name, res in rows:
             if res is None:
                 continue
-            if isinstance(res, dict):
-                import json
-                total += estimate_tokens(json.dumps(res, default=str))
-            elif isinstance(res, str):
-                total += estimate_tokens(res)
-            else:
-                total += estimate_tokens(str(res))
+            content = format_tool_result_for_context(
+                res,
+                conversation_id=str(conv_uuid),
+                tool_name=str(tool_name),
+                tool_result_id=str(result_id),
+            )
+            total += estimate_tokens(content)
 
         return total
 

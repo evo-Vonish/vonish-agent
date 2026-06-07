@@ -90,8 +90,8 @@ class Settings(BaseSettings):
     )
 
     # Server
-    host: str = Field(default="0.0.0.0", alias="HOST")
-    port: int = Field(default=8000, alias="PORT")
+    host: str = Field(default="127.0.0.1", alias="HOST")
+    port: int = Field(default=18480, alias="PORT")
     reload: bool = Field(default=False, alias="RELOAD")
 
     # Research Core runtime
@@ -161,7 +161,7 @@ class ModelConfig(BaseModel):
 MODEL_CONFIGS: dict[str, ModelConfig] = {
     "deepseek-v4-pro": ModelConfig(
         provider="deepseek",
-        context_window=1_000_000,
+        context_window=256_000,
         max_output_tokens=8192,
         supports_vision=False,
         supports_json_mode=True,
@@ -171,7 +171,7 @@ MODEL_CONFIGS: dict[str, ModelConfig] = {
     ),
     "deepseek-v4-flash": ModelConfig(
         provider="deepseek",
-        context_window=1_000_000,
+        context_window=256_000,
         max_output_tokens=8192,
         supports_vision=False,
         supports_json_mode=True,
@@ -219,36 +219,36 @@ class ContextProfile(BaseModel):
 
 CONTEXT_PROFILES: dict[str, ContextProfile] = {
     "cheap": ContextProfile(
-        max_input_tokens=32000,
-        recent_turns=6,
-        tool_result_mode="summary",
+        max_input_tokens=256000,
+        recent_turns=5,
+        tool_result_mode="hybrid",
         multimodal_mode="caption_only",
         memory_recall_top_k=5,
-        compression_strategy="aggressive",
+        compression_strategy="minimal",
     ),
     "balanced": ContextProfile(
-        max_input_tokens=96000,
-        recent_turns=16,
+        max_input_tokens=256000,
+        recent_turns=5,
         tool_result_mode="hybrid",
         multimodal_mode="caption_plus_refs",
         memory_recall_top_k=12,
-        compression_strategy="balanced",
+        compression_strategy="minimal",
     ),
     "max": ContextProfile(
         max_input_tokens=256000,
-        recent_turns=50,
-        tool_result_mode="verbose",
+        recent_turns=5,
+        tool_result_mode="hybrid",
         multimodal_mode="rich",
         memory_recall_top_k=30,
         compression_strategy="minimal",
     ),
     "custom": ContextProfile(
-        max_input_tokens=96000,
-        recent_turns=16,
+        max_input_tokens=256000,
+        recent_turns=5,
         tool_result_mode="hybrid",
         multimodal_mode="caption_plus_refs",
         memory_recall_top_k=12,
-        compression_strategy="balanced",
+        compression_strategy="minimal",
     ),
 }
 

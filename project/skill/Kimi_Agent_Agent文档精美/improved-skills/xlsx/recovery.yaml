@@ -1,0 +1,109 @@
+# XLSX Recovery Playbook — 错误恢复手册
+
+recovery:
+  # === P0级错误 ===
+  P0:
+    - error: "#VALUE!"
+      validator: "V0_1"
+      cause: "公式引用了错误类型的数据"
+      fix:
+        - "检查公式引用的单元格格式"
+        - "确保数值单元格不是文本格式"
+        - "使用VALUE()函数转换"
+      prevention: "写入数据时确保数值格式"
+      
+    - error: "#DIV/0!"
+      validator: "V0_1"
+      cause: "除以零"
+      fix:
+        - "用IFERROR包裹公式"
+        - "或先判断分母: =IF(B2=0,0,A2/B2)"
+      prevention: "所有除法添加零值保护"
+      
+    - error: "#REF!"
+      validator: "V0_1"
+      cause: "引用了不存在的单元格"
+      fix:
+        - "检查公式中的单元格引用"
+        - "确认引用的sheet存在"
+        - "确认引用的行/列范围正确"
+      prevention: "使用命名范围或INDIRECT"
+      
+    - error: "隐式数组公式"
+      validator: "V0_2"
+      cause: "MATCH(TRUE(), range>0, 0)等"
+      fix:
+        - "替换为SUMPRODUCT: =SUMPRODUCT((A1:A10>0)*ROW(A1:A10))-ROW(A1)+1"
+        - "或使用辅助列"
+      prevention: "避免MATCH(TRUE(), ...模式"
+      
+    - error: "使用XLOOKUP等不兼容函数"
+      validator: "V0_3"
+      cause: "使用了Excel 2019不支持的新函数"
+      fix:
+        - "XLOOKUP → VLOOKUP/INDEX+MATCH"
+        - "FILTER → 辅助列+SUMIF"
+        - "UNIQUE → 删除重复项功能"
+        - "LET → 拆分公式"
+      prevention: "只使用Excel 2013兼容函数"
+      
+    - error: "Python预计算而非公式"
+      validator: "V0_6"
+      cause: "用Python算出结果再写入"
+      fix:
+        - "将Python计算改为Excel公式"
+        - "确保所有派生值是formula-linked"
+      prevention: "写入时用=开头"
+
+  # === P1级错误 ===
+  P1:
+    - error: "缺少外部数据来源"
+      validator: "V1_3"
+      fix:
+        - "添加Source Name和Source URL列"
+        - "或创建Sources工作表"
+      fallback: "标注数据来源待补充"
+
+  # === P2级错误 ===
+  P2:
+    - error: "网格线未隐藏"
+      validator: "V2_1"
+      fix: "ws.sheet_view.showGridLines = False"
+      
+    - error: "内容从A1开始"
+      validator: "V2_2"
+      fix: "将所有内容右移一列、下移一行"
+      
+    - error: "表头无深色背景"
+      validator: "V2_3"
+      fix: "应用PatternFill(start_color=header_color)"
+      
+    - error: "图表无标题"
+      validator: "V2_5"
+      fix: "chart.title = '图表标题'"
+      
+    - error: "涨跌颜色错误"
+      validator: "V2_6"
+      fix: "中国大陆: 红涨绿跌; 国际: 绿涨红跌"
+
+  # === 通用恢复模式 ===
+  generic:
+    - name: "REGENERATE_SHEET"
+      when: "Sheet错误太多无法逐一修复"
+      steps:
+        - "删除有问题的sheet"
+        - "重新执行S4a-S4e流程"
+        
+    - name: "FIX_FORMULA_CHAIN"
+      when: "公式错误连锁反应"
+      steps:
+        - "从最上游的公式开始修复"
+        - "逐级向下验证"
+        - "使用公式审计追踪依赖"
+        
+    - name: "DOWNGRADE_FUNCTIONS"
+      when: "兼容性错误"
+      steps:
+        - "列出所有不兼容函数"
+        - "逐一替换为兼容替代"
+        - "重新验证"

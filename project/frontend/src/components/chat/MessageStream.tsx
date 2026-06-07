@@ -51,11 +51,11 @@ export function MessageStream({ className }: MessageStreamProps) {
         onScroll={handleScroll}
         className={cn(
           'flex-1 overflow-y-auto overflow-x-hidden scroll-smooth',
-          'py-4',
+          'px-4 py-5',
           className
         )}
       >
-        <div className="message-stream-shell mx-auto w-full space-y-0.5">
+        <div className="message-stream-shell mx-auto w-full space-y-1">
           {messages.map((msg: Message) => (
             <MessageBubble key={msg.id} message={msg} />
           ))}
@@ -67,9 +67,9 @@ export function MessageStream({ className }: MessageStreamProps) {
       {showScrollBtn && (
         <button
           onClick={scrollToBottom}
-          className="absolute bottom-4 right-4 z-10 p-2 rounded-full bg-surface-elevated border border-border shadow-lg hover:bg-surface-hover transition-colors"
+          className="absolute bottom-4 right-4 z-10 rounded-full border border-white/[0.08] bg-[#252423]/90 p-2 shadow-[0_16px_40px_rgba(0,0,0,0.42)] backdrop-blur-xl transition-colors hover:bg-white/[0.08]"
         >
-          <MessageSquare className="w-4 h-4 text-foreground-muted" />
+          <MessageSquare className="h-4 w-4 text-[#9a9590]" />
         </button>
       )}
     </>

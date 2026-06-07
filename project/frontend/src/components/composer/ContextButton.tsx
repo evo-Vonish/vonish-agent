@@ -3,11 +3,6 @@ import { Gauge, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useChatStore } from '@/stores/chatStore';
 import { useI18n } from '@/i18n';
-import {
-  getContextUsage as fetchContextUsageApi,
-  switchContextProfile as switchProfileApi,
-  compactContext as compactContextApi,
-} from '@/services/api';
 
 function TokenGauge({ used, budget }: { used: number; budget: number }) {
   const pct = Math.min(100, (used / budget) * 100);
@@ -78,29 +73,6 @@ export function ContextButton({ className }: { className?: string }) {
     setLoading(false);
   };
 
-  const handleSwitchProfile = async (id: string) => {
-    const cid = useChatStore.getState().currentConversationId;
-    if (!cid) return;
-    useChatStore.getState().switchContextProfile(id);
-    try { await switchProfileApi(cid, id); } catch {}
-    await fetchContextUsage();
-  };
-
-  const handleCompact = async (level: string) => {
-    const state = useChatStore.getState();
-    const cid = state.currentConversationId;
-    if (!cid) return;
-    try { await compactContextApi(cid, state.contextProfile.id, state.selectedModelId, level); } catch {}
-    await fetchContextUsage();
-  };
-
-  const compressionLevels = [
-    { value: 'none', label: '无压缩' },
-    { value: 'light', label: '轻度' },
-    { value: 'medium', label: '中度' },
-    { value: 'aggressive', label: '激进' },
-  ];
-
   const components = [
     ['System Prompt', 'system_prompt'],
     ['Recent Messages', 'recent_messages'],
@@ -167,27 +139,6 @@ export function ContextButton({ className }: { className?: string }) {
               </div>
             </div>
 
-            {/* Profile switcher */}
-            <div>
-              <h4 className="text-[10px] font-medium text-foreground-muted mb-1.5">{t('context.profile')}</h4>
-              <div className="grid grid-cols-3 gap-1">
-                {useChatStore.getState().availableProfiles.map((p) => (
-                  <button
-                    key={p.id}
-                    onClick={() => handleSwitchProfile(p.id)}
-                    className={cn(
-                      'rounded-md border px-1.5 py-1 text-[10px] transition-colors',
-                      (contextUsage?.profile ?? contextProfile.id) === p.id
-                        ? 'border-primary/50 bg-primary/10 text-primary'
-                        : 'border-border text-foreground-muted hover:bg-surface-hover'
-                    )}
-                  >
-                    {p.name}
-                  </button>
-                ))}
-              </div>
-            </div>
-
             {/* Components breakdown */}
             {contextUsage && (
               <div>
@@ -210,26 +161,6 @@ export function ContextButton({ className }: { className?: string }) {
               </div>
             )}
 
-            {/* Compression */}
-            <div>
-              <h4 className="text-[10px] font-medium text-foreground-muted mb-1.5">{t('context.compression')}</h4>
-              <div className="grid grid-cols-2 gap-1">
-                {compressionLevels.map((level) => (
-                  <button
-                    key={level.value}
-                    onClick={() => handleCompact(level.value)}
-                    className={cn(
-                      'rounded-md border px-2 py-1 text-[10px] transition-colors',
-                      contextProfile.compressionLevel === level.value
-                        ? 'border-primary/50 bg-primary/10 text-primary'
-                        : 'border-border text-foreground-muted hover:bg-surface-hover'
-                    )}
-                  >
-                    {level.label}
-                  </button>
-                ))}
-              </div>
-            </div>
           </div>
         </div>
       )}

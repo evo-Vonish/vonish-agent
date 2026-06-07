@@ -157,6 +157,62 @@ class HollowSearchCoreClient:
     async def health(self) -> dict[str, Any]:
         return await self._request("GET", "/health", timeout=8)
 
+    async def pipeline_health(self) -> dict[str, Any]:
+        """Check that the runtime is alive and the main search/fetch pipeline responds."""
+        report: dict[str, Any] = {
+            "service_alive": False,
+            "search_ok": False,
+            "fetch_ok": False,
+            "extract_ok": False,
+            "result_store_ok": True,
+            "errors": [],
+        }
+        health = await self.health()
+        report["service_alive"] = health.get("status") == "ok" and "engines" in health
+        report["health"] = health
+
+        if not report["service_alive"]:
+            report["errors"].append({"stage": "health", "message": "Research Core health response is not valid."})
+            return report
+
+        try:
+            search_data = await self._request(
+                "POST",
+                "/api/search",
+                json_data={"query": "VonishAgent", "mode": "overview", "limit": 1, "language": "auto"},
+                timeout=20,
+            )
+            results = search_data.get("results", [])
+            report["search_ok"] = isinstance(results, list)
+            report["search_count"] = len(results) if isinstance(results, list) else 0
+        except ResearchRuntimeError as error:
+            report["errors"].append({"stage": "search", **error.to_dict()})
+
+        try:
+            fetch_data = await self._request(
+                "POST",
+                "/api/fetch",
+                json_data={
+                    "urls": ["https://example.com/"],
+                    "preset": "fast",
+                    "maxCharsPerPage": 2000,
+                    "purify": True,
+                },
+                timeout=30,
+            )
+            pages = fetch_data.get("pages", [])
+            first = pages[0] if pages else {}
+            text = str(first.get("text") or first.get("markdown") or "")
+            report["fetch_ok"] = bool(pages) and first.get("status") == "success"
+            report["extract_ok"] = bool(text.strip())
+            report["fetch_status"] = first.get("status") or "none"
+            if not report["extract_ok"]:
+                report["errors"].append({"stage": "extract", "message": first.get("error") or "No extracted page text"})
+        except ResearchRuntimeError as error:
+            report["errors"].append({"stage": "fetch", **error.to_dict()})
+
+        return report
+
     async def search(self, query: str, mode: str = "overview", max_results: int = 20, language: str | None = None) -> dict[str, Any]:
         await self.ensure_ready()
         payload = {
@@ -207,6 +263,7 @@ class HollowSearchCoreClient:
         page = pages[0]
         text = page.get("text") or page.get("markdown") or ""
         if page.get("status") != "success" or not text.strip():
+            error_text = self._normalize_fetch_error(page.get("error"), page.get("status"), page.get("url") or url)
             return {
                 "success": False,
                 "url": page.get("url") or url,
@@ -214,7 +271,10 @@ class HollowSearchCoreClient:
                 "status": page.get("status", "failed"),
                 "summary": "",
                 "char_count": page.get("charCount", len(text)),
-                "error": page.get("error") or "No extracted page text",
+                "error": error_text,
+                "error_code": self._fetch_error_code(page.get("error"), page.get("status")),
+                "retryable": self._fetch_retryable(page.get("error"), page.get("status")),
+                "guidance": "Treat individual fetch/extract failures as normal web noise; switch source or use successful evidence instead of retrying the same URL.",
                 "stats": data.get("stats", {}),
             }
         stored = _result_store.put(
@@ -230,6 +290,8 @@ class HollowSearchCoreClient:
             "status": page.get("status", "failed"),
             "summary": stored["summary"],
             "content_ref": stored["content_ref"],
+            "tool_result_id": stored["content_ref"],
+            "result_ref": stored["content_ref"],
             "content_hash": stored["content_hash"],
             "duplicate": stored["duplicate"],
             "duplicate_of": stored.get("duplicate_of"),
@@ -237,6 +299,40 @@ class HollowSearchCoreClient:
             "error": page.get("error"),
             "stats": data.get("stats", {}),
         }
+
+    @staticmethod
+    def _fetch_error_code(error: Any, status: Any) -> str:
+        text = str(error or "").lower()
+        status_text = str(status or "").lower()
+        if "http 0" in text:
+            return "FETCH_HTTP_0"
+        if "timeout" in text or "timeout" in status_text:
+            return "FETCH_TIMEOUT"
+        if "no extracted" in text or "empty" in text:
+            return "EXTRACT_EMPTY_TEXT"
+        if status:
+            return f"FETCH_{str(status).upper()}"
+        return "FETCH_EXTRACT_FAILED"
+
+    @staticmethod
+    def _fetch_retryable(error: Any, status: Any) -> bool:
+        code = HollowSearchCoreClient._fetch_error_code(error, status)
+        return code in {"FETCH_HTTP_0", "FETCH_TIMEOUT", "EXTRACT_EMPTY_TEXT", "FETCH_EXTRACT_FAILED"}
+
+    @staticmethod
+    def _normalize_fetch_error(error: Any, status: Any, url: str) -> str:
+        text = str(error or "").strip()
+        if text.upper() == "HTTP 0":
+            return (
+                f"HTTP 0 while fetching {url}. Research Core did not receive a usable HTTP response; "
+                "common causes are DNS/TLS/network failure, anti-bot blocking, CORS-like fetch failure, "
+                "or a page that requires a dynamic browser."
+            )
+        if text:
+            return text
+        if status and str(status).lower() != "success":
+            return f"Fetch/extract failed with status {status} for {url}."
+        return f"No extracted page text for {url}."
 
     async def deep_research(
         self,
@@ -277,6 +373,8 @@ class HollowSearchCoreClient:
                     "url": page.get("url", ""),
                     "title": page.get("title", ""),
                     "content_ref": stored["content_ref"],
+                    "tool_result_id": stored["content_ref"],
+                    "result_ref": stored["content_ref"],
                     "content_hash": stored["content_hash"],
                     "duplicate": stored["duplicate"],
                     "summary": stored["summary"][:500],
@@ -318,6 +416,7 @@ class HollowSearchCoreClient:
             ],
             "evidence_pack": compact_evidence,
             "content_refs": content_refs,
+            "result_refs": [item["content_ref"] for item in content_refs],
             "stats": {
                 "search_ms": (data.get("search") or {}).get("tookMs", 0),
                 "crawl_ms": ((data.get("crawl") or {}).get("stats") or {}).get("totalMs", 0),

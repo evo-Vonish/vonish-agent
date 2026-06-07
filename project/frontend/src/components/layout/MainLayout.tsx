@@ -1,12 +1,10 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { AlertCircle, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
-import { useChatStore } from '@/stores/chatStore';
 import { TopBar } from './TopBar';
 import { Sidebar } from './Sidebar';
-import { StatusBar } from './StatusBar';
-import { ContextManagerPanel } from '@/components/composer/ContextManagerPanel';
+import { DissonanceField } from './DissonanceField';
+import { WorkbenchRightPanel } from './WorkbenchRightPanel';
 
 const MIN_PANEL_WIDTH = 240;
 const MAX_PANEL_WIDTH = 560;
@@ -19,7 +17,6 @@ interface MainLayoutProps {
 
 export function MainLayout({ children, className }: MainLayoutProps) {
   const { rightPanelOpen, setIsMobile } = useUIStore();
-  const { apiError, clearApiError } = useChatStore();
   const [panelWidth, setPanelWidth] = useState(DEFAULT_PANEL_WIDTH);
   const dragging = useRef(false);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -63,56 +60,37 @@ export function MainLayout({ children, className }: MainLayoutProps) {
   return (
     <div
       className={cn(
-        'h-screen w-screen flex flex-col bg-background text-foreground overflow-hidden',
+        'relative h-screen w-screen overflow-hidden bg-[#0a0a0b] text-[#e8e6e3]',
         className
       )}
     >
-      <TopBar />
-      {apiError && (
-        <div className="fixed right-4 top-12 z-50 max-w-md rounded-md border border-error/30 bg-error/10 px-3 py-2 text-xs text-error shadow-lg backdrop-blur">
-          <div className="flex items-start gap-2">
-            <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
-            <div className="min-w-0 flex-1">
-              <div className="font-medium">工作流已中断</div>
-              <div className="mt-0.5 break-words text-error/80">{apiError}</div>
-            </div>
-            <button
-              type="button"
-              onClick={clearApiError}
-              className="rounded p-0.5 hover:bg-error/15"
-              aria-label="关闭错误提示"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        </div>
-      )}
-      <div className="flex-1 flex overflow-hidden">
+      <DissonanceField />
+      <div className="relative z-10 flex h-full overflow-hidden">
         <Sidebar />
-        <main className="flex-1 flex flex-col overflow-hidden relative min-w-0">
-          {children}
-        </main>
+        <div className="flex min-w-0 flex-1 flex-col border-l border-white/[0.055] bg-[#0e0e0f]/70 backdrop-blur-xl">
+          <TopBar />
+          <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+            {children}
+          </main>
+        </div>
         {rightPanelOpen && (
           <>
-            {/* Drag handle */}
             <div
               onMouseDown={onMouseDown}
-              className="hidden md:block w-1.5 cursor-col-resize hover:bg-primary/30 active:bg-primary/50 bg-transparent transition-colors flex-shrink-0 relative group"
+              className="group relative hidden w-1.5 flex-shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-primary/25 active:bg-primary/40 md:block"
             >
-              <div className="absolute inset-y-0 left-1/2 -translate-x-px w-px bg-border group-hover:bg-primary/20" />
+              <div className="absolute inset-y-0 left-1/2 w-px -translate-x-px bg-white/[0.06] group-hover:bg-primary/25" />
             </div>
-            {/* Panel */}
             <div
               ref={panelRef}
-              className="border-l border-border bg-surface flex-shrink-0 overflow-y-auto hidden md:block"
+              className="hidden flex-shrink-0 overflow-y-auto border-l border-white/[0.06] bg-[#0e0e0f]/75 backdrop-blur-xl md:block"
               style={{ width: panelWidth }}
             >
-              <ContextManagerPanel />
+              <WorkbenchRightPanel />
             </div>
           </>
         )}
       </div>
-      <StatusBar />
     </div>
   );
 }

@@ -7,7 +7,7 @@ export const mockModels: Model[] = [
     provider: 'deepseek',
     description: 'DeepSeek 最新旗舰模型，擅长编程和复杂推理',
     maxTokens: 8192,
-    contextWindow: 128000,
+    contextWindow: 256000,
     tags: ['推荐', '编程'],
   },
   {
@@ -16,7 +16,7 @@ export const mockModels: Model[] = [
     provider: 'moonshot',
     description: 'Moonshot 长上下文模型，支持 200K 上下文',
     maxTokens: 4096,
-    contextWindow: 200000,
+    contextWindow: 256000,
     tags: ['长文本'],
   },
 ];
@@ -24,32 +24,32 @@ export const mockModels: Model[] = [
 export const mockContextProfile: ContextProfile = {
   id: 'balanced',
   name: 'Balanced',
-  tokenBudget: 64000,
+  tokenBudget: 256000,
   tokenUsed: 28400,
   messageRounds: 12,
   memoryCount: 8,
   fileCount: 5,
   toolCount: 6,
-  compressionLevel: 'light',
+  compressionLevel: 'none',
 };
 
 export const contextProfiles: ContextProfile[] = [
   {
     id: 'cheap',
     name: 'Cheap',
-    tokenBudget: 16000,
+    tokenBudget: 256000,
     tokenUsed: 8200,
     messageRounds: 6,
     memoryCount: 4,
     fileCount: 2,
     toolCount: 3,
-    compressionLevel: 'aggressive',
+    compressionLevel: 'none',
   },
   mockContextProfile,
   {
     id: 'max',
     name: 'Max',
-    tokenBudget: 128000,
+    tokenBudget: 256000,
     tokenUsed: 45200,
     messageRounds: 24,
     memoryCount: 16,

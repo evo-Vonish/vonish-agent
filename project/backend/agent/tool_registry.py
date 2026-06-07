@@ -370,6 +370,39 @@ def register_default_tools() -> None:
         )
     )
 
+    # Open Artifact in Workbench
+    registry.register(
+        ToolDefinition(
+            name="open_artifact",
+            description=(
+                "Present a generated or modified workspace artifact to the user by opening it "
+                "in the right-side Workbench file preview/editor. Use after creating files such "
+                "as .py, .md, .html, .pdf, .docx, .pptx, .xlsx, images, or reports so the user "
+                "can inspect, select, quote, and request targeted edits."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Relative path to the artifact inside the current workspace, e.g. outputs/report.pdf",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Optional display title for the workbench tab/card",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Short note explaining why this artifact is being opened",
+                    },
+                },
+                "required": ["path"],
+            },
+            category="workspace",
+            requires_confirmation=False,
+        )
+    )
+
     # Web Search
     registry.register(
         ToolDefinition(
@@ -806,6 +839,304 @@ def register_default_tools() -> None:
                 },
             },
             category="workspace",
+            requires_confirmation=False,
+        )
+    )
+
+    # Expand Tool Result
+    registry.register(
+        ToolDefinition(
+            name="expand_tool_result",
+            description=(
+                "Retrieve the complete stored content of a previously truncated tool "
+                "result. Use only when the head/tail view is insufficient. Identify "
+                "the result by tool_result_id when available, or by tool_name to use "
+                "the latest matching result. The full result remains expanded for "
+                "the next three context builds."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "tool_result_id": {
+                        "type": "string",
+                        "description": "Stored tool result id shown in a truncation marker.",
+                    },
+                    "tool_name": {
+                        "type": "string",
+                        "description": "Fallback: expand the latest result from this tool.",
+                    },
+                    "builds": {
+                        "type": "integer",
+                        "description": "How many upcoming context builds should keep the result expanded.",
+                        "default": 3,
+                    },
+                },
+            },
+            category="system",
+            requires_confirmation=False,
+        )
+    )
+
+    # Crazy expand all tool results
+    registry.register(
+        ToolDefinition(
+            name="CRAZY_for_tool_results",
+            description=(
+                "Temporarily expand all stored tool results into the model context. "
+                "Use before final synthesis, report writing, cross-source evidence "
+                "review, or debugging where maximum context recall is more valuable "
+                "than token economy. The expansion expires after the requested builds."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "builds": {
+                        "type": "integer",
+                        "description": "Upcoming context builds to keep all tool results fully expanded.",
+                        "default": 2,
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "Why full result recall is needed now.",
+                    },
+                },
+            },
+            category="system",
+            requires_confirmation=False,
+        )
+    )
+
+    # Focused tool result recall
+    registry.register(
+        ToolDefinition(
+            name="focus_tool_results",
+            description=(
+                "Open a targeted expansion window for tool results by id, tool name, "
+                "query/grep text, status, or latest count. Use this when only specific "
+                "search/fetch/command/file outputs are needed for the next step."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "tool_result_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Specific stored tool result ids/content refs to expand.",
+                    },
+                    "tool_names": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Tool names whose recent/current results should expand.",
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "Grep-style text query; matching tool results expand.",
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": ["any", "completed", "failed"],
+                        "default": "any",
+                    },
+                    "latest": {
+                        "type": "integer",
+                        "description": "Also expand the latest N matching tool results.",
+                        "default": 5,
+                    },
+                    "builds": {
+                        "type": "integer",
+                        "description": "Upcoming context builds to keep matching results expanded.",
+                        "default": 3,
+                    },
+                },
+            },
+            category="system",
+            requires_confirmation=False,
+        )
+    )
+
+    # Context map
+    registry.register(
+        ToolDefinition(
+            name="context_map",
+            description=(
+                "Inspect the current recallable context map without expanding raw content. "
+                "Use this before broad recall to see available user constraints, pinned items, "
+                "chat messages, tool results, compression status, and recall ids."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "scope": {
+                        "type": "string",
+                        "enum": ["all", "current_task", "recent", "pinned"],
+                        "default": "all",
+                    },
+                },
+            },
+            category="system",
+            requires_confirmation=False,
+        )
+    )
+
+    # Custom context recall
+    registry.register(
+        ToolDefinition(
+            name="custom_context_recall",
+            description=(
+                "Recall precise raw or structured context by target list. Supports tool_result, "
+                "chat_message, file, file_range, grep, search_result, browser_snapshot, "
+                "shell_output, diff, user_constraint, plan, and artifact_validation. Use before "
+                "code edits, final reports, factual citations, or complex debugging."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "targets": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "type": {
+                                    "type": "string",
+                                    "enum": [
+                                        "tool_result",
+                                        "chat_message",
+                                        "file",
+                                        "file_range",
+                                        "grep",
+                                        "search_result",
+                                        "browser_snapshot",
+                                        "error_log",
+                                        "shell_output",
+                                        "diff",
+                                        "user_constraint",
+                                        "plan",
+                                        "artifact_validation",
+                                    ],
+                                },
+                                "id": {"type": "string"},
+                                "path": {"type": "string"},
+                                "query": {"type": "string"},
+                                "startLine": {"type": "integer"},
+                                "endLine": {"type": "integer"},
+                            },
+                            "required": ["type"],
+                        },
+                        "description": "One or more recall targets.",
+                    },
+                    "turns": {"type": "integer", "default": 1},
+                    "maxTokens": {"type": "integer", "default": 4000},
+                    "mode": {
+                        "type": "string",
+                        "enum": ["raw", "key_segments", "summary_plus_segments", "structure_only"],
+                        "default": "summary_plus_segments",
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "Why exact context is needed now.",
+                    },
+                },
+                "required": ["targets", "reason"],
+            },
+            category="system",
+            requires_confirmation=False,
+        )
+    )
+
+    # Recall maximum
+    registry.register(
+        ToolDefinition(
+            name="recall_maximum",
+            description=(
+                "Activate MAX recall mode for a short window and expand as much relevant stored "
+                "context as budget allows. Use only for final synthesis, broad evidence audit, "
+                "large refactors, or complex debugging. Prefer context_map and custom_context_recall "
+                "for normal targeted work."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "turns": {"type": "integer", "default": 3},
+                    "scope": {
+                        "type": "string",
+                        "enum": ["current_task", "all_recent", "research", "coding", "debugging", "artifact", "custom"],
+                        "default": "current_task",
+                    },
+                    "maxTokens": {"type": "integer"},
+                    "priority": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "user_constraints",
+                                "tool_results",
+                                "research_evidence",
+                                "file_reads",
+                                "diffs",
+                                "errors",
+                                "plans",
+                                "chat_messages",
+                            ],
+                        },
+                    },
+                    "includeRaw": {"type": "boolean", "default": False},
+                    "includeKeySegments": {"type": "boolean", "default": True},
+                    "query": {"type": "string"},
+                    "reason": {"type": "string"},
+                },
+                "required": ["reason"],
+            },
+            category="system",
+            requires_confirmation=False,
+        )
+    )
+
+    # Pin Memory
+    registry.register(
+        ToolDefinition(
+            name="pin_memory",
+            description=(
+                "Pin a user constraint, file, decision, unresolved error, plan, or note so it "
+                "stays visible in context memory and is not treated as disposable history."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "type": "object",
+                        "properties": {
+                            "type": {
+                                "type": "string",
+                                "enum": ["user_constraint", "file", "decision", "error", "note", "plan"],
+                            },
+                            "id": {"type": "string"},
+                            "content": {"type": "string"},
+                        },
+                        "required": ["type"],
+                    },
+                    "reason": {"type": "string"},
+                    "expiresAfterTurns": {"type": "integer"},
+                },
+                "required": ["target"],
+            },
+            category="system",
+            requires_confirmation=False,
+        )
+    )
+
+    # Unpin Memory
+    registry.register(
+        ToolDefinition(
+            name="unpin_memory",
+            description="Deactivate one pinned memory item by pin id.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "targetId": {"type": "string"},
+                },
+                "required": ["targetId"],
+            },
+            category="system",
             requires_confirmation=False,
         )
     )

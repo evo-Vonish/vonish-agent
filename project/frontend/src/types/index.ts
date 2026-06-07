@@ -21,6 +21,7 @@ export interface Message {
   segments?: MessageSegment[];
   toolCalls?: ToolCall[];
   files?: UploadedFileMeta[];
+  references?: Reference[];
   timestamp: number;
   status?: 'sending' | 'streaming' | 'complete' | 'error';
 }
@@ -72,7 +73,24 @@ export type MessageSegment =
       type: 'workflow_error';
       error: WorkflowError;
       retryPrompt?: string;
+    }
+  | {
+      id: string;
+      type: 'artifact';
+      artifact: ArtifactRef;
     };
+
+export interface ArtifactRef {
+  id: string;
+  title: string;
+  path: string;
+  workspaceId?: string | null;
+  mimeType?: string;
+  kind?: string;
+  size?: number;
+  sourceToolCallId?: string;
+  description?: string;
+}
 
 export interface WorkflowErrorAction {
   id: string;
@@ -359,4 +377,53 @@ export interface SessionDraftOptions {
   workspaceId: string | null;
   permissionMode: PermissionDraftMode;
   directoryAccessMode: DirectoryAccessDraftMode;
+}
+
+// ── Unified Reference system (workbench → composer → agent) ──
+export type ReferenceSourceType =
+  | 'chat'
+  | 'file-selection'
+  | 'markdown-block'
+  | 'html-element'
+  | 'pdf-selection'
+  | 'doc-block'
+  | 'sheet-range'
+  | 'slide'
+  | 'slide-element'
+  | 'image'
+  | 'browser-element'
+  | 'artifact-block';
+
+export interface ReferenceLocation {
+  filePath?: string;
+  workspaceId?: string;
+  /** chat message id (for sourceType 'chat') */
+  messageId?: string;
+  lineStart?: number;
+  lineEnd?: number;
+  columnStart?: number;
+  columnEnd?: number;
+  blockId?: string;
+  blockType?: string;
+  elementId?: string;
+  cssPath?: string;
+  tagName?: string;
+  pageIndex?: number;
+  bbox?: [number, number, number, number];
+  sheetName?: string;
+  cellRange?: string;
+  slideIndex?: number;
+}
+
+export interface Reference {
+  id: string;
+  sourceType: ReferenceSourceType;
+  sourceId: string;
+  title: string;
+  preview: string;
+  createdAt: number;
+  /** Optional inline instruction attached to this reference. */
+  instruction?: string;
+  location?: ReferenceLocation;
+  payload?: unknown;
 }

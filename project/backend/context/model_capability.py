@@ -382,7 +382,7 @@ def _register_builtins(reg: ModelCapabilityRegistry) -> None:
         ModelCapability(
             provider="deepseek",
             model_id="deepseek-v4-pro",
-            context_window=1_000_000,
+            context_window=256_000,
             max_output_tokens=8192,
             supports_tool_call=True,
             supports_vision=False,
@@ -394,7 +394,7 @@ def _register_builtins(reg: ModelCapabilityRegistry) -> None:
         ModelCapability(
             provider="deepseek",
             model_id="deepseek-v4-flash",
-            context_window=1_000_000,
+            context_window=256_000,
             max_output_tokens=8192,
             supports_tool_call=True,
             supports_vision=False,

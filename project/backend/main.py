@@ -94,12 +94,23 @@ async def lifespan(app: FastAPI):
 
         ws_root = Path(settings.workspace_root)
         if ws_root.exists():
-            # Get all valid conversation IDs from DB
+            # Get all valid conversation/workspace IDs from DB. Some folders use
+            # UUID hex while SQLAlchemy stringifies UUIDs with dashes; project
+            # workspaces may also be named by metadata, so cleanup must be
+            # conservative.
             session_maker = get_session_maker()
             async with session_maker() as db_session:
                 from sqlalchemy import select
-                result = await db_session.execute(select(ConvModel.id))
-                valid_ids = {str(r) for r in result.scalars().all()}
+                result = await db_session.execute(select(ConvModel.id, ConvModel.metadata_))
+                valid_ids: set[str] = set()
+                for conv_id, meta in result.all():
+                    valid_ids.add(str(conv_id))
+                    valid_ids.add(conv_id.hex)
+                    if isinstance(meta, dict):
+                        for key in ("workspace_id", "project_id"):
+                            value = str(meta.get(key) or "").strip()
+                            if value:
+                                valid_ids.add(value)
 
             # Walk workspace root and remove dirs not in DB
             cleaned = 0
@@ -107,6 +118,15 @@ async def lifespan(app: FastAPI):
                 if d.is_dir() and d.name in valid_ids:
                     continue
                 if d.is_dir():
+                    try:
+                        # Only auto-delete UUID-like orphan folders. Named
+                        # project workspaces are user data and must not be
+                        # guessed as disposable.
+                        parsed = UUID(d.name)
+                    except ValueError:
+                        continue
+                    if str(parsed) in valid_ids or parsed.hex in valid_ids:
+                        continue
                     try:
                         await asyncio.to_thread(shutil.rmtree, d, ignore_errors=True)
                         cleaned += 1
@@ -213,7 +233,7 @@ def _register_routers(app: FastAPI) -> None:
     app.include_router(api_configs_router)
     app.include_router(prompt_router)
 
-    # ── Frontend static files (disabled in dev mode — use Vite dev server on :5173)
+    # ── Frontend static files (disabled in dev mode — use Vite dev server on :18473)
     # if FRONTEND_DIST.is_dir() and (FRONTEND_DIST / "index.html").exists():
     #     app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
     #     @app.get("/{full_path:path}", include_in_schema=False)
@@ -225,7 +245,7 @@ def _register_routers(app: FastAPI) -> None:
     #     logger.info(f"Frontend static files mounted from {FRONTEND_DIST}")
     # else:
     #     logger.warning(f"Frontend dist not found at {FRONTEND_DIST}")
-    logger.info("Frontend static files serving disabled — use Vite dev server on http://127.0.0.1:5173")
+    logger.info("Frontend static files serving disabled — use Vite dev server on http://127.0.0.1:18473")
 
     logger.info("All API routers registered.")
 

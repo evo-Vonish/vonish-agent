@@ -1,0 +1,132 @@
+# XLSX Validation Gates — 验证门槛
+
+validators:
+  # === P0: 安全门 ===
+  P0:
+    - id: "V0_1"
+      name: "无公式错误"
+      check: "recheck输出0 errors"
+      tool: "./scripts/Xlsx recheck"
+      errors_to_check: ["#VALUE!", "#DIV/0!", "#REF!", "#NAME?", "#NULL!", "#NUM!", "#N/A"]
+      fail_action: "FIX_FORMULA"
+      
+    - id: "V0_2"
+      name: "无隐式数组公式"
+      check: "无MATCH(TRUE(), range>0, 0)等模式"
+      tool: "recheck内置检测"
+      fail_action: "REWRITE_WITH_SUMPRODUCT"
+      
+    - id: "V0_3"
+      name: "无兼容函数"
+      check: "未使用XLOOKUP/FILTER/UNIQUE/LET"
+      tool: "validate内置检测"
+      fail_action: "REPLACE_COMPATIBLE_FUNCTIONS"
+      
+    - id: "V0_4"
+      name: "文件可打开"
+      check: "validate通过（OpenXML schema合规）"
+      tool: "./scripts/Xlsx validate"
+      fail_action: "REGENERATE_FILE"
+      
+    - id: "V0_5"
+      name: "图表有数据"
+      check: "chart-verify通过"
+      tool: "./scripts/Xlsx chart-verify"
+      condition: "存在图表"
+      fail_action: "FIX_CHART_DATA_RANGE"
+      
+    - id: "V0_6"
+      name: "公式非Python预计算"
+      check: "所有计算单元格使用Excel公式"
+      tool: "代码审查"
+      fail_action: "REPLACE_WITH_FORMULAS"
+
+  # === P1: 用户契约 ===
+  P1:
+    - id: "V1_1"
+      name: "输出格式为xlsx"
+      check: "文件扩展名为.xlsx"
+      fail_action: "RENAME_FILE"
+      
+    - id: "V1_2"
+      name: "内容符合Plan"
+      check: "所有xlsx sections已创建对应sheet"
+      fail_action: "ADD_MISSING_SHEETS"
+      
+    - id: "V1_3"
+      name: "外部数据有来源"
+      check: "存在Source Name和Source URL列/Sources sheet"
+      condition: "使用了外部数据"
+      fail_action: "ADD_SOURCE_COLUMNS"
+
+  # === P2: 质量标准 ===
+  P2:
+    - id: "V2_1"
+      name: "网格线已隐藏"
+      check: "ws.sheet_view.showGridLines = False"
+      weight: "high"
+      fail_action: "HIDE_GRIDLINES"
+      
+    - id: "V2_2"
+      name: "从B2开始"
+      check: "内容从B2开始，不从A1"
+      weight: "high"
+      fail_action: "SHIFT_CONTENT_TO_B2"
+      
+    - id: "V2_3"
+      name: "表头样式"
+      check: "深色背景+白字"
+      weight: "high"
+      fail_action: "APPLY_HEADER_STYLE"
+      
+    - id: "V2_4"
+      name: "交替行颜色"
+      check: "白色和#F9F9F9交替"
+      weight: "medium"
+      fail_action: "APPLY_ALT_ROWS"
+      
+    - id: "V2_5"
+      name: "图表有标题和轴标签"
+      check: "chart.title和轴标题不为空"
+      condition: "存在图表"
+      weight: "high"
+      fail_action: "ADD_CHART_TITLES"
+      
+    - id: "V2_6"
+      name: "地区颜色正确"
+      check: "涨跌颜色符合地区规范"
+      condition: "有涨跌幅数据"
+      weight: "medium"
+      fail_action: "SWAP_COLORS_BY_REGION"
+
+  # === P3: 风格偏好 ===
+  P3:
+    - id: "V3_1"
+      name: "条件格式增强"
+      check: "关键数据有数据条/色阶/图标集"
+      fail_action: "ADD_CONDITIONAL_FORMAT"
+      
+    - id: "V3_2"
+      name: "封面页完整"
+      check: "有报告标题、关键指标、工作表索引"
+      fail_action: "CREATE_COVER_SHEET"
+
+# === 执行策略 ===
+execution_flow:
+  order: ["P0", "P1", "P2", "P3"]
+  
+  P0_policy:
+    all_must_pass: true
+    if_fail: "STOP_DELIVER"
+    
+  P1_policy:
+    all_must_pass: true
+    if_fail: "WARN_USER"
+    
+  P2_policy:
+    min_pass_ratio: 0.8
+    if_fail: "SUGGEST_IMPROVEMENTS"
+    
+  P3_policy:
+    min_pass_ratio: 0.0
+    if_fail: "NOTE_PREFERENCES"

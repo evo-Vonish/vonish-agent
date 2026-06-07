@@ -1,0 +1,56 @@
+{
+  "schema_version": "2.0",
+  "name": "VonishAgent Artifact Engine",
+  "description": "跨格式文档生成系统：DOCX/XLSX/PDF/PPTX的统一工作流引擎，支持优先级分层、视觉验收和上下文召回",
+  
+  "skills": [
+    {
+      "name": "docx",
+      "trigger": "创建/编辑Word文档",
+      "entry": "SKILL.md",
+      "files": ["SKILL.md", "procedure.yaml", "validators.yaml", "recovery.yaml", "design_tokens.yaml"],
+      "tech_stack": "C# + OpenXML SDK",
+      "validation_tool": "./scripts/docx build"
+    },
+    {
+      "name": "xlsx",
+      "trigger": "创建/编辑Excel文件",
+      "entry": "SKILL.md",
+      "files": ["SKILL.md", "procedure.yaml", "validators.yaml", "recovery.yaml", "design_tokens.yaml"],
+      "tech_stack": "Python + openpyxl",
+      "validation_tool": "./scripts/Xlsx"
+    },
+    {
+      "name": "pdf",
+      "trigger": "创建/处理PDF",
+      "entry": "SKILL.md",
+      "files": ["SKILL.md", "procedure.yaml", "validators.yaml", "recovery.yaml", "design_tokens.yaml"],
+      "tech_stack": "HTML + Paged.js / LaTeX / Python",
+      "validation_tool": "./scripts/pdf.sh"
+    },
+    {
+      "name": "pptx",
+      "trigger": "创建/编辑PPT",
+      "entry": "SKILL.md",
+      "files": ["SKILL.md", "procedure.yaml", "validators.yaml", "recovery.yaml", "design_tokens.yaml"],
+      "tech_stack": "PPTD中间格式",
+      "validation_tool": "scripts/check.sh"
+    }
+  ],
+  
+  "shared": [
+    "PRIORITY_SYSTEM.md",
+    "ARTIFACT_PLAN.md",
+    "VISUAL_REVIEW.md",
+    "CONTEXT_RECALL.md"
+  ],
+  
+  "architecture": {
+    "routing": "Skill Router根据用户请求选择技能",
+    "planning": "Artifact Plan统一跨格式元模型",
+    "execution": "Procedure Graph驱动可执行步骤",
+    "validation": "P0-P3分层验证门",
+    "recovery": "Recovery Playbook自动修复",
+    "recall": "Context Recall机制防止失忆"
+  }
+}

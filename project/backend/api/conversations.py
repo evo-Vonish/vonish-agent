@@ -501,6 +501,7 @@ class MessageItem(BaseModel):
     segments: list[dict[str, Any]] | None = None
     tool_calls: list[dict[str, Any]] | None = None
     files: list[dict[str, Any]] | None = None
+    references: list[dict[str, Any]] | None = None
     timestamp: str
 
 
@@ -551,6 +552,22 @@ def _extract_text_unsafe(content: Any) -> str:
                 btype = str(block.get("type", ""))
                 if btype == "text":
                     texts.append(str(block.get("text", "")))
+                elif btype == "files":
+                    files = block.get("files")
+                    if isinstance(files, list):
+                        for file in files:
+                            if isinstance(file, dict):
+                                name = file.get("originalName") or file.get("title") or file.get("workspacePath") or "file"
+                                path = file.get("workspacePath") or file.get("uri") or ""
+                                texts.append(f"[文件] {name} {path}")
+                elif btype == "references":
+                    refs = block.get("references")
+                    if isinstance(refs, list):
+                        for ref in refs:
+                            if isinstance(ref, dict):
+                                title = ref.get("title") or ref.get("sourceType") or "reference"
+                                preview = str(ref.get("preview") or "")[:1200]
+                                texts.append(f"[引用] {title}\n{preview}")
                 elif btype == "segments":
                     segs = block.get("segments")
                     if not isinstance(segs, list):
@@ -668,6 +685,16 @@ def _extract_files(content: list[dict] | None) -> list[dict[str, Any]] | None:
     return None
 
 
+def _extract_references(content: list[dict] | None) -> list[dict[str, Any]] | None:
+    """Extract user-selected references attached to a message."""
+    if not content:
+        return None
+    for block in content:
+        if block.get("type") == "references" and isinstance(block.get("references"), list):
+            return block["references"]
+    return None
+
+
 def _make_snippet(text: str, query_lower: str, snippet_len: int = 60) -> tuple[str, list[list[int]]]:
     """Extract snippet around first match and compute highlight ranges.
 
@@ -726,6 +753,7 @@ async def get_conversation_messages(
             segments=_extract_segments(m.content),
             tool_calls=_extract_tool_calls(m.content),
             files=_extract_files(m.content),
+            references=_extract_references(m.content),
             timestamp=m.created_at.isoformat() if m.created_at else "",
         )
         for m in msgs

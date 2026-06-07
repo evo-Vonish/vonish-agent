@@ -1,0 +1,103 @@
+# PPTX Validation Gates — 验证门槛
+
+validators:
+  P0:
+    - id: "V0_1"
+      name: "check.sh 0 errors"
+      check: "check.sh报告0 errors"
+      tool: "scripts/check.sh"
+      fail_action: "FIX_AND_RECHECK"
+      
+    - id: "V0_2"
+      name: "无文字溢出"
+      check: "无TextOverflowWarning"
+      tool: "check.sh"
+      fail_action: "CONDENSE_TEXT_OR_EXPAND_BOUNDS"
+      
+    - id: "V0_3"
+      name: "无文字遮挡"
+      check: "无TextOcclusionWarning"
+      tool: "check.sh"
+      fail_action: "REORDER_Z_INDEX_OR_MOVE"
+      
+    - id: "V0_4"
+      name: "正文字号≥18px"
+      check: "所有body textStyle fontSize ≥ 18"
+      fail_action: "INCREASE_FONT_SIZE"
+      
+    - id: "V0_5"
+      name: "主题引用正确"
+      check: "所有$key引用在theme中定义"
+      tool: "check.sh"
+      fail_action: "DEFINE_MISSING_THEME_KEYS"
+      
+    - id: "V0_6"
+      name: "无重复elementId"
+      check: "每个.page内elementId唯一"
+      tool: "check.sh"
+      fail_action: "RENAME_DUPLICATE_IDS"
+
+  P1:
+    - id: "V1_1"
+      name: "输出.pptd格式"
+      check: "文件扩展名为.pptd"
+      fail_action: "RENAME"
+      
+    - id: "V1_2"
+      name: "所有section有对应page"
+      check: "artifact_plan的sections全部有.page"
+      fail_action: "ADD_MISSING_PAGES"
+      
+    - id: "V1_3"
+      name: "字体在允许列表"
+      check: "所有fontFamily在format/fonts.md中"
+      fail_action: "SWAP_TO_ALLOWED_FONT"
+
+  P2:
+    - id: "V2_1"
+      name: "无AI典型配色"
+      check: "无紫色/渐变白紫/纯蓝#0000FF"
+      weight: "high"
+      fail_action: "SWAP_PALETTE"
+      
+    - id: "V2_2"
+      name: "封面有冲击力"
+      check: "封面使用Hero/Swiss/Magazine/Frame风格"
+      weight: "high"
+      fail_action: "REDESIGN_COVER"
+      
+    - id: "V2_3"
+      name: "标题正文字号差异"
+      check: "标题字号 - 正文字号 ≥ 8px"
+      weight: "high"
+      fail_action: "ADJUST_FONT_SIZES"
+      
+    - id: "V2_4"
+      name: "一页一信息"
+      check: "每页只有一个核心主题"
+      weight: "medium"
+      fail_action: "SPLIT_OR_FOCUS"
+      
+    - id: "V2_5"
+      name: "数据点数量"
+      check: "每页3-6个高亮数据点"
+      weight: "medium"
+      fail_action: "ADD_OR_REMOVE_DATA_POINTS"
+
+  P3:
+    - id: "V3_1"
+      name: "目录页非列表"
+      check: "目录使用网格/时间线/非对称布局"
+      fail_action: "REDESIGN_TOC"
+      
+    - id: "V3_2"
+      name: "正文≤50汉字"
+      check: "每页正文不超过50个汉字"
+      fail_action: "CONDENSE_TEXT"
+
+execution_flow:
+  order: ["P0", "P1", "P2", "P3"]
+  P0_policy: { all_must_pass: true, if_fail: "STOP" }
+  P1_policy: { all_must_pass: true, if_fail: "WARN" }
+  P2_policy: { min_pass_ratio: 0.8, if_fail: "SUGGEST" }
+  P3_policy: { min_pass_ratio: 0.0, if_fail: "NOTE" }
