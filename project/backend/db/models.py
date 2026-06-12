@@ -509,3 +509,81 @@ class ContextBuild(Base):
 
     # Relationships
     conversation: Mapped["Conversation"] = relationship(back_populates="context_builds")
+
+
+# ---------------------------------------------------------------------------
+# Git Timeline / Checkpoint Models
+# ---------------------------------------------------------------------------
+
+class GitCommitRecord(Base):
+    """Hidden Shadow Git checkpoint metadata."""
+
+    __tablename__ = "git_commit_records"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=new_uuid)
+    workspace_id: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    turn_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True, index=True)
+    commit_hash: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    short_hash: Mapped[str] = mapped_column(String(16), nullable=False)
+    kind: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    created_by: Mapped[str] = mapped_column(String(40), default="system")
+    shadow_path: Mapped[str] = mapped_column(Text, nullable=False)
+    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON_DATA, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class TurnGitState(Base):
+    """Maps a user turn to before/after Shadow Git checkpoints."""
+
+    __tablename__ = "turn_git_states"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=new_uuid)
+    conversation_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    workspace_id: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    turn_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, index=True)
+    before_commit_hash: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    after_commit_hash: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    status: Mapped[str] = mapped_column(String(30), default="running")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON_DATA, default=dict)
+
+
+class ArtifactVersionRecord(Base):
+    """Version pointer for a workspace artifact stored in Shadow Git."""
+
+    __tablename__ = "artifact_version_records"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=new_uuid)
+    workspace_id: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    artifact_path: Mapped[str] = mapped_column(Text, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    label: Mapped[str] = mapped_column(String(80), nullable=False)
+    commit_hash: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON_DATA, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ConversationBranch(Base):
+    """Archived conversation branch created by edit/retry rollback."""
+
+    __tablename__ = "conversation_branches"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=new_uuid)
+    conversation_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    parent_turn_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True, index=True)
+    branch_type: Mapped[str] = mapped_column(String(30), default="edit")
+    archived_message_ids: Mapped[list[str]] = mapped_column(STRING_LIST, default=list)
+    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON_DATA, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -403,6 +403,70 @@ def register_default_tools() -> None:
         )
     )
 
+    # Artifact Skill Reader
+    registry.register(
+        ToolDefinition(
+            name="list_artifact_skills",
+            description=(
+                "List the bundled artifact-production skills available to the agent. "
+                "Use before creating polished DOCX, XLSX, PDF, or PPTX deliverables "
+                "to see which skill files can be loaded."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {},
+            },
+            category="system",
+            requires_confirmation=False,
+        )
+    )
+
+    registry.register(
+        ToolDefinition(
+            name="read_artifact_skill",
+            description=(
+                "Read bundled artifact-production skill instructions for polished deliverables. "
+                "Call this before producing DOCX, XLSX, PDF, or PPTX files. The model receives "
+                "the full skill content, while the frontend displays only a compact read summary."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "skill": {
+                        "type": "string",
+                        "enum": ["docx", "xlsx", "pdf", "pptx"],
+                        "description": "Artifact skill to read.",
+                    },
+                    "files": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "SKILL.md",
+                                "procedure.yaml",
+                                "validators.yaml",
+                                "recovery.yaml",
+                                "design_tokens.yaml",
+                            ],
+                        },
+                        "description": (
+                            "Optional specific skill files to load. Defaults to entry, "
+                            "procedure, validators, and design tokens."
+                        ),
+                    },
+                    "include_shared": {
+                        "type": "boolean",
+                        "description": "Also load shared Artifact Plan, priority, visual review, and recall guidance.",
+                        "default": True,
+                    },
+                },
+                "required": ["skill"],
+            },
+            category="system",
+            requires_confirmation=False,
+        )
+    )
+
     # Web Search
     registry.register(
         ToolDefinition(
@@ -837,6 +901,42 @@ def register_default_tools() -> None:
                     "line_end": {"type": "integer"},
                     "limit": {"type": "integer", "default": 20},
                 },
+            },
+            category="workspace",
+            requires_confirmation=False,
+        )
+    )
+
+    # Git Checkpoint
+    registry.register(
+        ToolDefinition(
+            name="git_checkpoint",
+            description=(
+                "Create an explicit Agent checkpoint in the hidden Shadow Git timeline. "
+                "Use only for meaningful milestones, handoff checkpoints, or artifact versions. "
+                "This does not commit to the user's real Git repository."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "workspace_id": {"type": "string", "default": "current"},
+                    "kind": {
+                        "type": "string",
+                        "enum": ["agent_milestone", "artifact_version", "handoff_checkpoint"],
+                        "default": "agent_milestone",
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "Short checkpoint label explaining what changed.",
+                    },
+                    "artifacts": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Relative artifact paths when kind=artifact_version.",
+                    },
+                    "metadata": {"type": "object"},
+                },
+                "required": ["kind", "message"],
             },
             category="workspace",
             requires_confirmation=False,

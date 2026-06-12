@@ -311,6 +311,8 @@ class ToolExecutor:
             "deep_research": self._handle_deep_research,
             "research_status": self._handle_research_status,
             "open_artifact": self._handle_open_artifact,
+            "list_artifact_skills": self._handle_list_artifact_skills,
+            "read_artifact_skill": self._handle_read_artifact_skill,
             "delete_file": self._handle_delete_file,
             "apply_patch": self._handle_apply_patch,
             "list_directory": self._handle_list_directory,
@@ -320,6 +322,7 @@ class ToolExecutor:
             "git_status": self._handle_git_status,
             "git_diff": self._handle_git_diff,
             "git_history": self._handle_git_history,
+            "git_checkpoint": self._handle_git_checkpoint,
             "expand_tool_result": self._handle_expand_tool_result,
             "CRAZY_for_tool_results": self._handle_crazy_for_tool_results,
             "recall_maximum": self._handle_recall_maximum,
@@ -633,6 +636,24 @@ class ToolExecutor:
                 "and invite targeted edits using selections/references."
             ),
         }
+
+    async def _handle_list_artifact_skills(self, **_: Any) -> dict[str, Any]:
+        """List bundled artifact production skills."""
+        from services.artifact_skill_service import available_artifact_skills
+
+        return available_artifact_skills()
+
+    async def _handle_read_artifact_skill(
+        self,
+        skill: str,
+        files: list[str] | None = None,
+        include_shared: bool = True,
+        **_: Any,
+    ) -> dict[str, Any]:
+        """Read a bundled artifact production skill for model guidance."""
+        from services.artifact_skill_service import read_artifact_skill
+
+        return read_artifact_skill(skill=skill, files=files, include_shared=include_shared)
 
     async def _handle_web_fetch(
         self,
@@ -1199,6 +1220,39 @@ class ToolExecutor:
             limit=limit,
         )
 
+    async def _handle_git_checkpoint(
+        self,
+        workspace_id: str = "current",
+        kind: str = "agent_milestone",
+        message: str = "",
+        artifacts: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+        conversation_id: str = "",
+        **_: Any,
+    ) -> dict[str, Any]:
+        from services.git_timeline_service import create_checkpoint, record_artifact_versions
+
+        resolved_workspace_id = self._resolve_tool_workspace_id(workspace_id, conversation_id)
+        result = await create_checkpoint(
+            resolved_workspace_id,
+            kind,
+            message or kind,
+            conversation_id=conversation_id or None,
+            created_by="agent",
+            metadata=metadata or {},
+            allow_agent_kind=True,
+        )
+        payload = result.__dict__
+        if result.success and kind == "artifact_version" and conversation_id:
+            payload["artifact_versions"] = await record_artifact_versions(
+                resolved_workspace_id,
+                conversation_id,
+                result.commit_hash,
+                artifacts or [],
+                label=message,
+            )
+        return payload
+
     # ── Tool Result Expansion ─────────────────────────────────────────
 
     async def _handle_expand_tool_result(
@@ -1338,11 +1392,22 @@ class ToolExecutor:
         """Activate a broad recall window and return the current context map."""
         if not conversation_id:
             return {"success": False, "error": "conversation_id is required"}
-        from context.context_memory import build_context_map
+        from context.context_memory import activate_max_recall_window, build_context_map
         from context.minimal_context import expansion_state, mark_all_tool_results_expanded, mark_tool_result_focus
 
         safe_turns = max(1, min(int(turns or 3), 10))
         safe_tokens = max(4_000, min(int(maxTokens or 80_000), 180_000))
+        recall_window = await activate_max_recall_window(
+            conversation_id=conversation_id,
+            turns=safe_turns,
+            scope=scope,
+            max_tokens=safe_tokens,
+            priority=priority,
+            include_raw=includeRaw,
+            include_key_segments=includeKeySegments,
+            query=query,
+            reason=reason,
+        )
         if includeRaw or scope in {"research", "debugging", "coding", "artifact", "all_recent", "current_task"}:
             if query:
                 mark_tool_result_focus(conversation_id, query=query, builds=safe_turns)
@@ -1369,6 +1434,7 @@ class ToolExecutor:
             "includeKeySegments": bool(includeKeySegments),
             "query": query,
             "reason": reason,
+            "recallWindow": recall_window,
             "contextMap": context_map,
             "toolResultExpansionState": expansion_state(conversation_id),
             "guidance": (

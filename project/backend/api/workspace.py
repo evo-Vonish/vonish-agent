@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Body, Depends, HTTPException, UploadFile, File
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -63,6 +63,26 @@ class CreateWorkspaceItemRequest(BaseModel):
     path: str = Field(..., description="Relative path")
     type: str = Field(default="file", description="file or folder")
     content: str = Field(default="", description="Initial file content")
+
+
+class CheckpointRequest(BaseModel):
+    kind: str = Field(default="agent_milestone")
+    message: str = Field(default="")
+    artifacts: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class RollbackPreviewRequest(BaseModel):
+    turn_id: str = Field(..., description="User message id / turn id")
+
+
+class TimelineTurnRequest(BaseModel):
+    conversation_id: str | None = None
+    message: str | None = None
+
+
+class RestoreArtifactVersionRequest(BaseModel):
+    version: int = Field(..., ge=1)
 
 
 TEXT_PREVIEW_EXTENSIONS = {
@@ -277,6 +297,136 @@ async def workspace_git_history(
         line_end=line_end,
         limit=limit,
     )
+
+
+@router.post("/workspaces/{conversation_id}/git/checkpoint/agent")
+async def workspace_agent_checkpoint(
+    conversation_id: str,
+    request: CheckpointRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    from services.git_timeline_service import create_checkpoint, record_artifact_versions
+
+    result = await create_checkpoint(
+        conversation_id,
+        request.kind,
+        request.message or request.kind,
+        conversation_id=conversation_id,
+        created_by="agent",
+        metadata=request.metadata,
+        allow_agent_kind=True,
+    )
+    payload = result.__dict__
+    if result.success and request.kind == "artifact_version":
+        payload["artifact_versions"] = await record_artifact_versions(
+            conversation_id,
+            conversation_id,
+            result.commit_hash,
+            request.artifacts,
+            label=request.message or "",
+        )
+    return payload
+
+
+@router.post("/workspaces/{conversation_id}/git/milestone/user")
+async def workspace_user_milestone(
+    conversation_id: str,
+    request: CheckpointRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    from services.git_timeline_service import create_checkpoint
+
+    result = await create_checkpoint(
+        conversation_id,
+        "user_milestone",
+        request.message or "User milestone",
+        conversation_id=conversation_id,
+        created_by="user",
+        metadata=request.metadata,
+    )
+    return result.__dict__
+
+
+@router.post("/workspaces/{conversation_id}/timeline/rollback-preview")
+async def workspace_rollback_preview(
+    conversation_id: str,
+    request: RollbackPreviewRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    from services.git_timeline_service import rollback_preview
+
+    return await rollback_preview(conversation_id, request.turn_id)
+
+
+@router.post("/workspaces/{conversation_id}/timeline/turns/{turn_id}/edit")
+async def workspace_edit_turn(
+    conversation_id: str,
+    turn_id: str,
+    request: TimelineTurnRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    from services.git_timeline_service import rollback_turn_for_replay
+
+    actual_conversation_id = request.conversation_id or conversation_id
+    result = await rollback_turn_for_replay(actual_conversation_id, conversation_id, turn_id, "edit")
+    if request.message is not None and result.get("payload"):
+        result["payload"]["message"] = request.message
+    return result
+
+
+@router.post("/workspaces/{conversation_id}/timeline/turns/{turn_id}/retry")
+async def workspace_retry_turn(
+    conversation_id: str,
+    turn_id: str,
+    request: TimelineTurnRequest = Body(default_factory=TimelineTurnRequest),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    from services.git_timeline_service import rollback_turn_for_replay
+
+    actual_conversation_id = request.conversation_id or conversation_id
+    return await rollback_turn_for_replay(actual_conversation_id, conversation_id, turn_id, "retry")
+
+
+@router.get("/workspaces/{conversation_id}/timeline/git")
+async def workspace_git_timeline(
+    conversation_id: str,
+    limit: int = 80,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    from services.git_timeline_service import git_timeline
+
+    return await git_timeline(conversation_id, conversation_id=conversation_id, limit=limit)
+
+
+@router.get("/workspaces/{conversation_id}/artifacts/{artifact_path:path}/versions")
+async def workspace_artifact_versions(
+    conversation_id: str,
+    artifact_path: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    from services.git_timeline_service import artifact_versions
+
+    return await artifact_versions(conversation_id, artifact_path)
+
+
+@router.post("/workspaces/{conversation_id}/artifacts/{artifact_path:path}/restore-version")
+async def workspace_restore_artifact_version(
+    conversation_id: str,
+    artifact_path: str,
+    request: RestoreArtifactVersionRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    from services.git_timeline_service import restore_artifact_version
+
+    return await restore_artifact_version(conversation_id, artifact_path, request.version)
 
 
 @router.post("/workspaces/{conversation_id}/open")

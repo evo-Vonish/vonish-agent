@@ -495,6 +495,7 @@ async def clear_conversation(
 
 
 class MessageItem(BaseModel):
+    id: str
     role: str
     content: str
     thinking: str | None = None
@@ -744,9 +745,15 @@ async def get_conversation_messages(
         .order_by(Message.created_at.asc())
     )
     msgs = (await db.execute(msgs_q)).scalars().all()
+    archived_ids = {
+        str(item)
+        for item in ((conv.metadata_ or {}).get("archived_message_ids") or [])
+    }
+    msgs = [m for m in msgs if str(m.id) not in archived_ids]
 
     items = [
         MessageItem(
+            id=str(m.id),
             role=m.role,
             content=_extract_text(m.content),
             thinking=m.thinking_content,

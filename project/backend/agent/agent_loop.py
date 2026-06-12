@@ -27,6 +27,7 @@ from agent.model_adapter import (
     ModelAdapterFactory,
     ToolDefinition,
 )
+from agent.message_sanitizer import sanitize_model_messages
 from agent.tool_executor import ToolCallRequest, ToolCallResult, ToolExecutor
 from core.config import settings
 from core.errors import AgentError
@@ -51,7 +52,7 @@ logger = get_logger(__name__)
 class AgentLoopConfig(BaseModel):
     """Configuration for the Agent Loop."""
 
-    max_rounds: int = 10
+    max_rounds: int = 24
     enable_thinking: bool = True
     json_mode: bool = False
     max_tool_calls_per_step: int = 4
@@ -288,7 +289,10 @@ class AgentLoop:
             )
 
             # Multi-round loop
+            exhausted_after_tools = False
+            empty_response_retries = 0
             for round_num in range(self.config.max_rounds):
+                exhausted_after_tools = False
                 if stop_event.is_set():
                     yield sse_event("aborted", {"reason": "user_request"})
                     return
@@ -352,6 +356,7 @@ class AgentLoop:
                 if todo_reminder:
                     effective_prompt = (effective_prompt or "") + todo_reminder
 
+                context.messages = sanitize_model_messages(context.messages)
                 self._ensure_context_within_limit(context, effective_prompt)
 
                 # Stream from model — pass tools natively, NOT in prompt text
@@ -515,6 +520,32 @@ class AgentLoop:
                     yield sse_event("thinking_end", {})
 
                 if not native_tool_calls and not accumulated_text.strip():
+                    if round_num > 0 and empty_response_retries < 2:
+                        empty_response_retries += 1
+                        context.messages.append(
+                            MessageBlock(
+                                role="user",
+                                content=(
+                                    "[Runtime auto-resume] The previous provider stream ended "
+                                    "without visible text or tool calls after tool results were "
+                                    "added. Continue from the latest tool results. If enough work "
+                                    "is complete, produce the user-facing answer; otherwise choose "
+                                    "one safe next tool call."
+                                ),
+                            )
+                        )
+                        yield sse_event(
+                            "context_status",
+                            {
+                                **self._context_status_payload(
+                                    context,
+                                    phase="auto_resume_after_empty_model_response",
+                                ),
+                                "summary": "模型空响应后已自动续接，无需用户发送 continue。",
+                                "autoResumeAttempt": empty_response_retries,
+                            },
+                        )
+                        continue
                     yield sse_event(
                         "error",
                         {
@@ -625,8 +656,9 @@ class AgentLoop:
                                     "toolName": result.tool_name,
                                     "toolCallId": result.call_id,
                                     **(
-                                        {"result": result.result}
+                                        {"result": self._frontend_tool_result(result)}
                                         if result.tool_name in {"git_status", "git_diff", "git_history", "set_todo_list"}
+                                        or self._is_artifact_skill_result(result)
                                         or result_skipped
                                         or not result.success
                                         else {}
@@ -643,7 +675,7 @@ class AgentLoop:
                                 "call_id": result.call_id,
                                 "tool": result.tool_name,
                                 "success": result.success,
-                                "result": result.result,
+                                "result": self._frontend_tool_result(result),
                                 "error": (
                                     result.error_message if not result.success else None
                                 ),
@@ -721,12 +753,28 @@ class AgentLoop:
                         ),
                     )
                     # Continue to next round — model will synthesize answer OR pause for user
+                    exhausted_after_tools = True
                     continue
 
                 else:
                     # --- Final text response ---
                     # Text was already streamed inline; just break
                     break
+
+            if exhausted_after_tools:
+                yield sse_event(
+                    "error",
+                    {
+                        "detail": (
+                            f"工作流已连续执行 {self.config.max_rounds} 个模型/工具回合后暂停，"
+                            "最后一轮工具结果已经写入上下文，但模型还没有生成最终回复。"
+                        ),
+                        "code": "MAX_ROUNDS_EXHAUSTED",
+                        "recoverable": True,
+                        "stage": "post_tool_model_round",
+                    },
+                )
+                return
 
             # End message
             yield sse_event("message_end", {"rounds": round_num + 1})
@@ -763,7 +811,7 @@ class AgentLoop:
         return conversation_id in self._active_loops
 
     @staticmethod
-    def _research_budget_tool(tool_name: str) -> bool:
+    def _budgeted_tool(tool_name: str) -> bool:
         return tool_name in {
             "deep_research",
             "research_fetch",
@@ -771,6 +819,8 @@ class AgentLoop:
             "research_status",
             "web_fetch",
             "web_search",
+            "open_artifact",
+            "shell_command",
         }
 
     @staticmethod
@@ -782,6 +832,14 @@ class AgentLoop:
             return urlparse(url).netloc.lower()
         except Exception:
             return ""
+
+    @staticmethod
+    def _budget_failure_key(tool_name: str, arguments: dict[str, Any]) -> str:
+        if tool_name == "open_artifact":
+            return f"open_artifact:{str(arguments.get('path') or arguments.get('file_path') or '').strip().lower()}"
+        if tool_name == "shell_command":
+            return f"shell_command:{str(arguments.get('command') or '').strip().lower()[:180]}"
+        return tool_name
 
     @staticmethod
     def _budget_error_code(result: ToolCallResult) -> str:
@@ -807,14 +865,15 @@ class AgentLoop:
         )
 
     def _budget_skip_reason(self, conversation_id: str, tool_name: str, arguments: dict[str, Any]) -> str | None:
-        if not self._research_budget_tool(tool_name):
+        if not self._budgeted_tool(tool_name):
             return None
         state = self._budget_state(conversation_id)
+        failure_key = self._budget_failure_key(tool_name, arguments)
         domain = self._budget_domain(tool_name, arguments)
         if state.get("degraded") and tool_name in {"deep_research", "research_fetch"}:
             return "Research degraded mode is active after repeated fetch/extract failures. Use existing successful sources, summarize partial evidence, or ask the user before retrying."
-        if int(state["tool_failures"].get(tool_name, 0)) >= 2:
-            return f"{tool_name} is paused after 2 consecutive failures. Switch strategy instead of retrying the same tool."
+        if int(state["tool_failures"].get(failure_key, 0)) >= 2:
+            return f"{tool_name} target is paused after 2 repeated failures. Switch strategy instead of retrying the same path/command."
         if domain and int(state["domain_failures"].get(domain, 0)) >= 2:
             return f"Domain {domain} is skipped after 2 fetch/extract failures. Use another source or continue with available evidence."
         return None
@@ -839,19 +898,20 @@ class AgentLoop:
         )
 
     def _record_budget_result(self, conversation_id: str, result: ToolCallResult) -> None:
-        if not self._research_budget_tool(result.tool_name):
+        if not self._budgeted_tool(result.tool_name):
             return
         if result.metadata.get("budget_skipped"):
             return
         state = self._budget_state(conversation_id)
         args = result.arguments or {}
+        failure_key = self._budget_failure_key(result.tool_name, args)
         domain = self._budget_domain(result.tool_name, args)
         if result.success:
-            state["tool_failures"][result.tool_name] = 0
+            state["tool_failures"][failure_key] = 0
             return
 
         state["total_failures"] = int(state.get("total_failures", 0)) + 1
-        state["tool_failures"][result.tool_name] = int(state["tool_failures"].get(result.tool_name, 0)) + 1
+        state["tool_failures"][failure_key] = int(state["tool_failures"].get(failure_key, 0)) + 1
         if domain:
             state["domain_failures"][domain] = int(state["domain_failures"].get(domain, 0)) + 1
         code = self._budget_error_code(result)
@@ -870,6 +930,13 @@ class AgentLoop:
             return result.error_message or f"{result.tool_name} failed"
         payload = result.result
         if isinstance(payload, dict):
+            if result.tool_name == "read_artifact_skill" or payload.get("artifact_skill"):
+                files = payload.get("files_read") if isinstance(payload.get("files_read"), list) else []
+                skill = str(payload.get("skill") or "artifact").upper()
+                return f"已读取 {skill} skill · {len(files)} files"
+            if result.tool_name == "list_artifact_skills":
+                skills = payload.get("skills") if isinstance(payload.get("skills"), dict) else {}
+                return f"可用 artifact skills: {', '.join(sorted(skills.keys()))}"
             if payload.get("skipped"):
                 return str(payload.get("reason") or "已跳过重复失败路径")[:500]
             if result.tool_name == "research_search":
@@ -906,6 +973,30 @@ class AgentLoop:
             return payload[:500]
         return "执行完成"
 
+    @staticmethod
+    def _is_artifact_skill_result(result: ToolCallResult) -> bool:
+        return (
+            result.tool_name == "read_artifact_skill"
+            and isinstance(result.result, dict)
+            and bool(result.result.get("artifact_skill"))
+        )
+
+    @staticmethod
+    def _frontend_tool_result(result: ToolCallResult) -> Any:
+        """Return a UI-safe result payload without large skill bodies."""
+        if not AgentLoop._is_artifact_skill_result(result):
+            return result.result
+        payload = result.result if isinstance(result.result, dict) else {}
+        return {
+            "success": payload.get("success", result.success),
+            "artifact_skill": True,
+            "skill": payload.get("skill"),
+            "files_read": payload.get("files_read", []),
+            "missing_files": payload.get("missing_files", []),
+            "display": payload.get("display", {}),
+            "model_guidance": payload.get("model_guidance"),
+        }
+
     async def _build_context(
         self,
         conversation_id: str,
@@ -930,7 +1021,9 @@ class AgentLoop:
             prompt = system_prompt
             enabled_names = list(ToolRegistry().list_all())
             history_messages = await self._get_conversation_history(conversation_id)
-            messages = history_messages + [MessageBlock(role="user", content=user_input)]
+            messages = sanitize_model_messages(
+                history_messages + [MessageBlock(role="user", content=user_input)]
+            )
             registry = ToolRegistry()
             all_schemas = registry.list_for_json_schema()
             enabled_schemas = [
@@ -961,6 +1054,7 @@ class AgentLoop:
                         tool_call_id=msg.get("tool_call_id"),
                     )
                 )
+            messages = sanitize_model_messages(messages)
             enabled_schemas = [
                 item
                 for item in built.tools
@@ -1145,6 +1239,16 @@ class AgentLoop:
                         "tool_name": persisted_result.get("tool_name"),
                         "expanded_for_context_builds": persisted_result.get("expanded_for_context_builds"),
                     }
+                if result.tool_name == "read_artifact_skill" and isinstance(persisted_result, dict):
+                    persisted_result = {
+                        "success": persisted_result.get("success", result.success),
+                        "artifact_skill": True,
+                        "skill": persisted_result.get("skill"),
+                        "files_read": persisted_result.get("files_read", []),
+                        "missing_files": persisted_result.get("missing_files", []),
+                        "display": persisted_result.get("display", {}),
+                        "model_guidance": persisted_result.get("model_guidance"),
+                    }
 
                 tool_call = ToolCallModel(
                     conversation_id=conv_uuid,
@@ -1206,7 +1310,7 @@ class AgentLoop:
                 tool_result_id=str(
                     result.metadata.get("stored_tool_result_id") or result.call_id
                 ),
-                force_full=result.tool_name == "expand_tool_result",
+                force_full=result.tool_name in {"expand_tool_result", "read_artifact_skill"},
             )
             context.messages.append(
                 MessageBlock(
@@ -1250,12 +1354,13 @@ class AgentLoop:
         for result in tool_results or []:
             raw_content = result.result if result.success else {"error": result.error_message}
             raw_text = serialize_tool_result(raw_content)
+            is_skill = result.tool_name == "read_artifact_skill"
             appended_results.append(
                 {
                     "tool": result.tool_name,
                     "success": result.success,
                     "rawChars": len(raw_text),
-                    "compressed": len(raw_text) > TOOL_RESULT_MAX_CHARS,
+                    "compressed": False if is_skill else len(raw_text) > TOOL_RESULT_MAX_CHARS,
                     "storedToolResultId": result.metadata.get("stored_tool_result_id"),
                 }
             )
@@ -1305,7 +1410,7 @@ class AgentLoop:
             raw_content = result.result if result.success else {"error": result.error_message}
             serialized = serialize_tool_result(raw_content)
             model_result: Any = raw_content
-            if len(serialized) > TOOL_RESULT_MAX_CHARS or result.tool_name == "expand_tool_result":
+            if len(serialized) > TOOL_RESULT_MAX_CHARS or result.tool_name in {"expand_tool_result", "read_artifact_skill"}:
                 model_result = format_tool_result_for_context(
                     raw_content,
                     conversation_id=context.conversation_id,
@@ -1313,7 +1418,7 @@ class AgentLoop:
                     tool_result_id=str(
                         result.metadata.get("stored_tool_result_id") or result.call_id
                     ),
-                    force_full=result.tool_name == "expand_tool_result",
+                    force_full=result.tool_name in {"expand_tool_result", "read_artifact_skill"},
                 )
             payload.append(
                 {
@@ -1365,6 +1470,10 @@ class AgentLoop:
                 text = ""
                 if m.content and isinstance(m.content, list):
                     text = "".join(b.get("text", "") for b in m.content if b.get("type") == "text")
+                if m.role == "assistant" and not text.strip() and m.thinking_content:
+                    text = "[Historical assistant thinking checkpoint; no visible final text was stored.]"
+                if not text.strip() and not m.thinking_content:
+                    continue
                 history.append(
                     MessageBlock(
                         role=m.role,

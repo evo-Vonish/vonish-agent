@@ -11,6 +11,7 @@ import type {
   MessageSegment,
   UploadedFileMeta,
   WorkflowError,
+  Reference,
 } from '@/types';
 import { contextProfiles } from '@/services/mockData';
 import {
@@ -28,6 +29,8 @@ import {
   summarizeConversationTitle,
   summarizeThinking,
   getContextUsage,
+  editTimelineTurn,
+  retryTimelineTurn,
   uploadConversationFiles,
 } from '@/services/api';
 import { generateId } from '@/lib/utils';
@@ -81,15 +84,34 @@ interface PendingInteraction {
   plan?: { id: string; title: string; description?: string; risk?: string }[];
 }
 
+interface EditingTurn {
+  messageId: string;
+  originalText: string;
+  /** Original uploaded files from the message being edited — already in workspace, no re-upload needed. */
+  files?: UploadedFileMeta[];
+}
+
 interface SendMessageOptions {
   internalContinue?: boolean;
   autoResumeDepth?: number;
+  targetConversationId?: string;
+  /** Pre-uploaded files from a rollback payload (retry) — merged into stream resources without re-upload. */
+  restoredFiles?: UploadedFileMeta[];
+}
+
+interface ConversationRuntime {
+  isStreaming: boolean;
+  startedAt: number;
+  assistantMessageId?: string;
+  abortController?: AbortController | null;
+  pendingInteraction?: PendingInteraction | null;
 }
 
 interface ChatState {
   conversations: Conversation[];
   currentConversationId: string | null;
   messages: Message[];
+  conversationRuntimes: Record<string, ConversationRuntime>;
   models: Model[];
   selectedModelId: string;
   contextProfile: ContextProfile;
@@ -103,15 +125,22 @@ interface ChatState {
   initialized: boolean;
   _abortController: AbortController | null;
   pendingInteraction: PendingInteraction | null;
+  editingTurn: EditingTurn | null;
 
   initialize: () => Promise<void>;
   setInputText: (text: string) => void;
   addMessage: (msg: Message) => void;
+  addMessageToConversation: (conversationId: string, msg: Message) => void;
   updateMessage: (id: string, partial: Partial<Message>) => void;
+  updateMessageInConversation: (conversationId: string, id: string, partial: Partial<Message>) => void;
+  isConversationStreaming: (conversationId?: string | null) => boolean;
   sendMessage: (content: string, options?: SendMessageOptions) => Promise<void>;
   resumeWorkflow: (prompt?: string) => Promise<void>;
   stopGeneration: () => void;
   respondToInteraction: (choice: string, message?: string) => Promise<void>;
+  beginEditMessage: (messageId: string) => void;
+  cancelEditMessage: () => void;
+  retryMessage: (messageId: string) => Promise<void>;
   selectConversation: (id: string) => Promise<void>;
   createConversation: (title?: string) => Promise<string>;
   createProject: (input: { name: string; directoryPath?: string }) => Promise<string>;
@@ -652,10 +681,48 @@ function projectErrorMessage(raw: unknown, fallback: Parameters<typeof createWor
   };
 }
 
+function visibleMessagesBeforeTurn(messages: Message[], turnId: string): Message[] {
+  const index = messages.findIndex((message) => message.id === turnId);
+  return index >= 0 ? messages.slice(0, index) : messages;
+}
+
+function messagesForConversation(state: ChatState, conversationId: string): Message[] {
+  if (state.currentConversationId === conversationId) return state.messages;
+  return state.conversations.find((conversation) => conversation.id === conversationId)?.messages ?? [];
+}
+
+function messageForConversation(state: ChatState, conversationId: string, messageId: string): Message | undefined {
+  return messagesForConversation(state, conversationId).find((message) => message.id === messageId);
+}
+
+function currentRuntimePatch(
+  state: ChatState,
+  runtimes: Record<string, ConversationRuntime>,
+): Pick<ChatState, 'isStreaming' | '_abortController' | 'pendingInteraction'> {
+  const runtime = state.currentConversationId ? runtimes[state.currentConversationId] : undefined;
+  return {
+    isStreaming: Boolean(runtime?.isStreaming),
+    _abortController: runtime?.abortController ?? null,
+    pendingInteraction: runtime?.pendingInteraction ?? null,
+  };
+}
+
+function setConversationMessages(
+  state: ChatState,
+  conversationId: string,
+  messages: Message[],
+): Pick<ChatState, 'messages' | 'conversations'> {
+  return {
+    messages: state.currentConversationId === conversationId ? messages : state.messages,
+    conversations: appendMessageToConversation(state.conversations, conversationId, messages),
+  };
+}
+
 export const useChatStore = create<ChatState>((set, get) => ({
   conversations: [],
   currentConversationId: null,
   messages: [],
+  conversationRuntimes: {},
   models: fallbackModels,
   selectedModelId: fallbackModels[0].id,
   contextProfile: contextProfiles.find((p) => p.id === 'balanced') ?? contextProfiles[0],
@@ -669,6 +736,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   initialized: false,
   _abortController: null,
   pendingInteraction: null,
+  editingTurn: null,
 
   initialize: async () => {
     if (get().initialized) return;
@@ -719,7 +787,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               : [];
             const toolCalls = segmentToolCalls.length ? segmentToolCalls : persistedToolCalls;
             return {
-              id: generateId(),
+              id: m.id ? String(m.id) : generateId(),
               role,
               content: m.content,
               thinkingContent: m.thinking ?? undefined,
@@ -763,35 +831,43 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   addMessage: (msg) =>
     set((state) => {
+      if (!state.currentConversationId) return state;
       const messages = [...state.messages, msg];
-      return {
-        messages,
-        conversations: appendMessageToConversation(
-          state.conversations,
-          state.currentConversationId,
-          messages,
-        ),
-      };
+      return setConversationMessages(state, state.currentConversationId, messages);
+    }),
+
+  addMessageToConversation: (conversationId, msg) =>
+    set((state) => {
+      const messages = [...messagesForConversation(state, conversationId), msg];
+      return setConversationMessages(state, conversationId, messages);
     }),
 
   updateMessage: (id, partial) =>
     set((state) => {
+      if (!state.currentConversationId) return state;
       const messages = state.messages.map((message) =>
         message.id === id ? { ...message, ...partial } : message,
       );
-      return {
-        messages,
-        conversations: appendMessageToConversation(
-          state.conversations,
-          state.currentConversationId,
-          messages,
-        ),
-      };
+      return setConversationMessages(state, state.currentConversationId, messages);
     }),
 
+  updateMessageInConversation: (conversationId, id, partial) =>
+    set((state) => {
+      const messages = messagesForConversation(state, conversationId).map((message) =>
+        message.id === id ? { ...message, ...partial } : message,
+      );
+      return setConversationMessages(state, conversationId, messages);
+    }),
+
+  isConversationStreaming: (conversationId) => {
+    const id = conversationId ?? get().currentConversationId;
+    return Boolean(id && get().conversationRuntimes[id]?.isStreaming);
+  },
+
   sendMessage: async (content, options = {}) => {
-    if (get().isStreaming) return;
-    const usage = get().contextUsage;
+    const requestedConversationId = options.targetConversationId ?? get().currentConversationId;
+    if (requestedConversationId && get().isConversationStreaming(requestedConversationId)) return;
+    const usage = requestedConversationId === get().currentConversationId ? get().contextUsage : null;
     if (usage && usage.totalTokens >= usage.maxTokens) {
       set({ apiError: '上下文已达到固定 256K 限制，请新建对话后继续。' });
       return;
@@ -803,11 +879,43 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const trimmedContent = content.trim();
     if (!trimmedContent && !hasAttachments && referenceList.length === 0) return;
 
-    let conversationId = get().currentConversationId;
+    let conversationId = requestedConversationId;
     if (!conversationId) {
       conversationId = await get().createConversation(
         firstLineTitle(trimmedContent || attachmentSnapshot[0]?.file.name || 'File upload'),
       );
+    }
+    if (get().isConversationStreaming(conversationId)) return;
+
+    const currentConversationForRequest = get().conversations.find((conversation) => conversation.id === conversationId);
+    const selectedWorkspaceIdForRequest = String(
+      currentConversationForRequest?.metadata?.workspace_id ||
+      currentConversationForRequest?.metadata?.project_id ||
+      conversationId,
+    );
+    const editingTurn = !internalContinue ? get().editingTurn : null;
+    if (editingTurn) {
+      try {
+        await editTimelineTurn(
+          selectedWorkspaceIdForRequest,
+          conversationId,
+          editingTurn.messageId,
+          trimmedContent,
+        );
+        set((state) => ({
+          ...setConversationMessages(
+            state,
+            conversationId,
+            visibleMessagesBeforeTurn(messagesForConversation(state, conversationId), editingTurn.messageId),
+          ),
+          editingTurn: null,
+          inputText: '',
+        }));
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        set({ apiError: detail, inputText: trimmedContent });
+        throw error;
+      }
     }
 
     let userMsg: Message | null = null;
@@ -822,7 +930,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         timestamp: Date.now(),
         status: 'complete',
       };
-      get().addMessage(userMsg);
+      get().addMessageToConversation(conversationId, userMsg);
       set({ attachments: [] });
       useReferenceStore.getState().clearReferences();
     }
@@ -835,9 +943,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
       timestamp: Date.now(),
       status: 'streaming',
     };
-    get().addMessage(assistantMsg);
+    get().addMessageToConversation(conversationId, assistantMsg);
     const abort = new AbortController();
-    set({ isStreaming: true, apiError: null, pendingInteraction: null, _abortController: abort });
+    set((state) => {
+      const conversationRuntimes = {
+        ...state.conversationRuntimes,
+        [conversationId]: {
+          isStreaming: true,
+          startedAt: Date.now(),
+          assistantMessageId: assistantMsg.id,
+          abortController: abort,
+          pendingInteraction: null,
+        },
+      };
+      return {
+        conversationRuntimes,
+        apiError: null,
+        ...currentRuntimePatch(state, conversationRuntimes),
+      };
+    });
 
     const currentMsgId = assistantMsg.id;
     const selectedModelForRequest = get().selectedModelId;
@@ -853,10 +977,69 @@ export const useChatStore = create<ChatState>((set, get) => ({
     let activeExecutionSegmentId: string | null = null;
     let structuredExecutionActive = false;
     let shouldAutoResumeWorkflow = false;
+    let backgroundCompletionNotified = false;
+
+    const currentAssistantMessage = () => messageForConversation(get(), conversationId, currentMsgId);
+
+    const setRuntimePendingInteraction = (pending: PendingInteraction | null) => {
+      set((state) => {
+        const previous = state.conversationRuntimes[conversationId];
+        const conversationRuntimes = {
+          ...state.conversationRuntimes,
+          [conversationId]: {
+            isStreaming: previous?.isStreaming ?? true,
+            startedAt: previous?.startedAt ?? Date.now(),
+            assistantMessageId: currentMsgId,
+            abortController: previous?.abortController ?? abort,
+            pendingInteraction: pending,
+          },
+        };
+        return {
+          conversationRuntimes,
+          ...currentRuntimePatch(state, conversationRuntimes),
+        };
+      });
+    };
+
+    const markRuntimeStopped = (notifyBackground = false) => {
+      set((state) => {
+        const previous = state.conversationRuntimes[conversationId];
+        const conversationRuntimes = {
+          ...state.conversationRuntimes,
+          [conversationId]: {
+            isStreaming: false,
+            startedAt: previous?.startedAt ?? Date.now(),
+            assistantMessageId: previous?.assistantMessageId ?? currentMsgId,
+            abortController: null,
+            pendingInteraction: previous?.pendingInteraction ?? null,
+          },
+        };
+        return {
+          conversationRuntimes,
+          ...currentRuntimePatch(state, conversationRuntimes),
+        };
+      });
+      if (notifyBackground && !backgroundCompletionNotified && get().currentConversationId !== conversationId) {
+        backgroundCompletionNotified = true;
+        const title =
+          get().conversations.find((conversation) => conversation.id === conversationId)?.title || '后台对话';
+        useContextToastStore.getState().pushContextToast({
+          phase: 'workflow_completed',
+          active: false,
+          mechanism: 'Conversation Runtime',
+          summary: `“${title}” 的后台工作流已完成。`,
+          totalTokens: 0,
+          maxTokens: 256000,
+          usageRatio: 0,
+          components: {},
+          messageCount: messagesForConversation(get(), conversationId).length,
+        });
+      }
+    };
 
     const appendSegment = (segment: MessageSegment) => {
-      const current = get().messages.find((m) => m.id === currentMsgId);
-      get().updateMessage(currentMsgId, {
+      const current = currentAssistantMessage();
+      get().updateMessageInConversation(conversationId, currentMsgId, {
         segments: [...(current?.segments ?? []), segment],
       });
     };
@@ -865,8 +1048,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       segmentId: string,
       updater: (segment: MessageSegment) => MessageSegment,
     ) => {
-      const current = get().messages.find((m) => m.id === currentMsgId);
-      get().updateMessage(currentMsgId, {
+      const current = currentAssistantMessage();
+      get().updateMessageInConversation(conversationId, currentMsgId, {
         segments: updateSegment(current?.segments, segmentId, updater),
       });
     };
@@ -921,7 +1104,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     };
 
     try {
-      let uploadedFiles: UploadedFileMeta[] = [];
+      // Files already in the workspace from a prior edit/retry rollback — no re-upload needed.
+      const preUploadedFiles: UploadedFileMeta[] = [
+        ...(options.restoredFiles ?? []),
+        ...(!internalContinue && editingTurn?.files ? editingTurn.files : []),
+      ];
+
+      let uploadedFiles: UploadedFileMeta[] = [...preUploadedFiles];
       if (selectedWorkspaceId) {
         await useWorkspaceStore.getState().selectWorkspace(selectedWorkspaceId);
       }
@@ -932,11 +1121,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
           selectedWorkspaceId,
         );
         uploadedFiles = [
+          ...preUploadedFiles,
           ...uploadResult.uploaded,
           ...(uploadResult.failed ?? []).map((file) => ({ ...file, status: 'failed' as const })),
         ];
-        if (userMsg) get().updateMessage(userMsg.id, { files: uploadedFiles });
+        if (userMsg) get().updateMessageInConversation(conversationId, userMsg.id, { files: uploadedFiles });
         useWorkspaceStore.getState().loadWorkspace(conversationId);
+      } else if (preUploadedFiles.length > 0 && userMsg) {
+        // No new attachments, but we have pre-uploaded files from rollback — update the user bubble.
+        get().updateMessageInConversation(conversationId, userMsg.id, { files: preUploadedFiles });
       }
 
       await streamChat(
@@ -1114,7 +1307,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
           if (event === 'thinking_end') {
             if (structuredExecutionActive || activeExecutionSegmentId) return;
-            const current = get().messages.find((m) => m.id === currentMsgId);
+            const current = currentAssistantMessage();
             const finishedId = activeThinkingSegmentId;
             const finished = current?.segments?.find(
               (segment) => segment.id === finishedId && segment.type === 'thinking',
@@ -1147,7 +1340,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
           if (event === 'text_delta' || event === 'markdown_delta') {
             const delta = String(data.content ?? '');
-            const current = get().messages.find((m) => m.id === currentMsgId);
+            const current = currentAssistantMessage();
             if (!activeTextSegmentId) {
               activeTextSegmentId = generateId();
               appendSegment({ id: activeTextSegmentId, type: 'text', content: '' });
@@ -1157,7 +1350,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 ? { ...segment, content: `${segment.content}${delta}` }
                 : segment,
             );
-            get().updateMessage(currentMsgId, {
+            get().updateMessageInConversation(conversationId, currentMsgId, {
               content: `${current?.content ?? ''}${delta}`,
             });
             return;
@@ -1183,9 +1376,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
             };
             activeTextSegmentId = null;
             activeThinkingSegmentId = null;
-            const current = get().messages.find((m) => m.id === currentMsgId);
+            const current = currentAssistantMessage();
             const existing = current?.toolCalls ?? [];
-            get().updateMessage(currentMsgId, {
+            get().updateMessageInConversation(conversationId, currentMsgId, {
               type: 'tool_call',
               toolCalls: [...existing, newCall],
               segments: [
@@ -1198,15 +1391,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
           if (event === 'interaction_required') {
             const pending = normalizePendingInteraction(data);
-            if (pending) set({ pendingInteraction: pending });
+            if (pending) setRuntimePendingInteraction(pending);
             return;
           }
 
           if (event === 'agent_paused') {
             // Mark the message as waiting for user
-            const current = get().messages.find((m) => m.id === currentMsgId);
+            const current = currentAssistantMessage();
             if (current?.interaction) {
-              get().updateMessage(currentMsgId, {
+              get().updateMessageInConversation(conversationId, currentMsgId, {
                 interaction: { ...current.interaction, resolved: false },
               });
             }
@@ -1214,7 +1407,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
 
           if (event === 'agent_resumed') {
-            set({ pendingInteraction: null });
+            setRuntimePendingInteraction(null);
             return;
           }
 
@@ -1227,13 +1420,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
             if (success && isInteractiveToolName(toolName) && result && typeof result === 'object') {
               const pending = normalizePendingInteraction(result as Record<string, unknown>, callId);
               if (pending) {
-                set({ pendingInteraction: pending });
+                setRuntimePendingInteraction(pending);
               }
               return;
             }
             const error = data.error ? String(data.error) : undefined;
             const duration = Number(data.duration_ms ?? 0);
-            const current = get().messages.find((m) => m.id === currentMsgId);
+            const current = currentAssistantMessage();
             const toolCalls = (current?.toolCalls ?? []).map((tc) =>
               tc.id === callId
                 ? {
@@ -1270,7 +1463,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               };
             }
 
-            get().updateMessage(currentMsgId, updates);
+            get().updateMessageInConversation(conversationId, currentMsgId, updates);
             return;
           }
 
@@ -1278,14 +1471,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
             const detail = String(data.detail ?? 'Unknown API error');
             const errorCode = String(data.code ?? 'stream_error');
             console.error('Chat stream returned error event', data);
-            const current = get().messages.find((m) => m.id === currentMsgId);
+            const current = currentAssistantMessage();
             const errorSegment = createWorkflowErrorSegment(data, {
               title: '工作流已中断',
               message: detail,
               errorType: errorCode,
               severity: 'error',
             });
-            get().updateMessage(currentMsgId, {
+            get().updateMessageInConversation(conversationId, currentMsgId, {
               content: detail,
               type: 'error',
               status: 'error',
@@ -1294,15 +1487,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 errorSegment,
               ],
             });
-            set({ apiError: detail, isStreaming: false });
+            set({ apiError: detail });
+            markRuntimeStopped(false);
             shouldAutoResumeWorkflow = errorCode !== 'CONTEXT_LIMIT_EXCEEDED';
             return;
           }
 
           if (event === 'aborted') {
-            const current = get().messages.find((m) => m.id === currentMsgId);
+            const current = currentAssistantMessage();
             const reason = String(data.reason ?? 'user_request');
-            get().updateMessage(currentMsgId, {
+            get().updateMessageInConversation(conversationId, currentMsgId, {
               status: 'error',
               content: 'Generation stopped.',
               segments: [
@@ -1315,7 +1509,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 }),
               ],
             });
-            set({ isStreaming: false });
+            markRuntimeStopped(false);
             return;
           }
 
@@ -1340,8 +1534,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
 
           if (event === 'message_end') {
-            get().updateMessage(currentMsgId, { status: 'complete' });
-            set({ isStreaming: false });
+            get().updateMessageInConversation(conversationId, currentMsgId, { status: 'complete' });
+            markRuntimeStopped(true);
           }
         },
         abort.signal,
@@ -1362,14 +1556,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
         },
       );
 
-      const latest = get().messages.find((m) => m.id === currentMsgId);
+      const latest = currentAssistantMessage();
       if (latest?.status === 'streaming') {
-        get().updateMessage(currentMsgId, { status: 'complete' });
+        get().updateMessageInConversation(conversationId, currentMsgId, { status: 'complete' });
       }
       // Refresh context usage after streaming completes
-      void get().fetchContextUsage();
-      const finalAssistant = get().messages.find((m) => m.id === currentMsgId);
-      const turnCount = get().messages.filter((message) => message.role === 'user').length;
+      if (get().currentConversationId === conversationId) void get().fetchContextUsage();
+      const conversationMessages = messagesForConversation(get(), conversationId);
+      const finalAssistant = conversationMessages.find((m) => m.id === currentMsgId);
+      const turnCount = conversationMessages.filter((message) => message.role === 'user').length;
       if (!internalContinue && finalAssistant?.status === 'complete' && turnCount > 0 && turnCount <= 2) {
         void summarizeConversationTitle(conversationId, selectedModelForRequest)
           .then((title) => {
@@ -1389,15 +1584,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
     } catch (error) {
       // AbortError is expected on user-triggered stop — not a real error
       if (error instanceof DOMException && error.name === 'AbortError') {
-        get().updateMessage(currentMsgId, {
+        get().updateMessageInConversation(conversationId, currentMsgId, {
           status: 'complete',
-          content: get().messages.find((m) => m.id === currentMsgId)?.content || '',
+          content: currentAssistantMessage()?.content || '',
         });
       } else {
         const detail = error instanceof Error ? error.message : String(error);
         console.error('Chat stream failed', error);
-        const current = get().messages.find((m) => m.id === currentMsgId);
-        get().updateMessage(currentMsgId, {
+        const current = currentAssistantMessage();
+        get().updateMessageInConversation(conversationId, currentMsgId, {
           content: detail,
           type: 'error',
           status: 'error',
@@ -1415,21 +1610,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
         shouldAutoResumeWorkflow = true;
       }
     } finally {
-      set((state) => ({
-        isStreaming: false,
-        _abortController: null,
-        attachments: state.attachments.map((attachment) => ({ ...attachment, uploading: false })),
-      }));
-      if (
+      const willAutoResume =
         shouldAutoResumeWorkflow &&
         !abort.signal.aborted &&
-        (options.autoResumeDepth ?? 0) < MAX_WORKFLOW_AUTO_RESUMES
-      ) {
+        (options.autoResumeDepth ?? 0) < MAX_WORKFLOW_AUTO_RESUMES;
+      markRuntimeStopped(!abort.signal.aborted && !willAutoResume);
+      set((state) => ({
+        attachments: state.attachments.map((attachment) => ({ ...attachment, uploading: false })),
+      }));
+      if (willAutoResume) {
         window.setTimeout(() => {
-          if (get().isStreaming || get().currentConversationId !== conversationId) return;
+          if (get().isConversationStreaming(conversationId)) return;
           void get().sendMessage(WORKFLOW_AUTO_RESUME_PROMPT, {
             internalContinue: true,
             autoResumeDepth: (options.autoResumeDepth ?? 0) + 1,
+            targetConversationId: conversationId,
           });
         }, 250);
       }
@@ -1437,19 +1632,39 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   resumeWorkflow: async (prompt) => {
+    const conversationId = get().currentConversationId;
+    if (!conversationId) return;
     await get().sendMessage(prompt || WORKFLOW_AUTO_RESUME_PROMPT, {
       internalContinue: true,
       autoResumeDepth: 0,
+      targetConversationId: conversationId,
     });
   },
 
   stopGeneration: () => {
-    const ctrl = get()._abortController;
+    const conversationId = get().currentConversationId;
+    const ctrl = conversationId ? get().conversationRuntimes[conversationId]?.abortController : null;
     if (ctrl) {
       ctrl.abort();
-      set({ _abortController: null });
+      set((state) => {
+        if (!conversationId) return state;
+        const previous = state.conversationRuntimes[conversationId];
+        const conversationRuntimes = {
+          ...state.conversationRuntimes,
+          [conversationId]: {
+            isStreaming: false,
+            startedAt: previous?.startedAt ?? Date.now(),
+            assistantMessageId: previous?.assistantMessageId,
+            abortController: null,
+            pendingInteraction: previous?.pendingInteraction ?? null,
+          },
+        };
+        return {
+          conversationRuntimes,
+          ...currentRuntimePatch(state, conversationRuntimes),
+        };
+      });
     }
-    const conversationId = get().currentConversationId;
     if (conversationId) {
       stopChat(conversationId).catch(() => {});
     }
@@ -1457,7 +1672,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   respondToInteraction: async (choice, message) => {
     const conversationId = get().currentConversationId;
-    const pending = get().pendingInteraction;
+    const pending = conversationId
+      ? get().conversationRuntimes[conversationId]?.pendingInteraction ?? get().pendingInteraction
+      : null;
     if (!conversationId || !pending) return;
 
     const interactionId = pending.interactionId || pending.toolCallId;
@@ -1487,11 +1704,94 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
+  beginEditMessage: (messageId) => {
+    const conversationId = get().currentConversationId;
+    if (!conversationId || get().isConversationStreaming(conversationId)) return;
+    const message = messagesForConversation(get(), conversationId).find(
+      (item) => item.id === messageId && item.role === 'user',
+    );
+    if (!message) return;
+    // Restore references from the original message into the composer reference bar.
+    const refs = message.references ?? [];
+    if (refs.length > 0) {
+      useReferenceStore.getState().setReferences(refs);
+    } else {
+      useReferenceStore.getState().clearReferences();
+    }
+    set({
+      editingTurn: { messageId, originalText: message.content, files: message.files },
+      inputText: message.content,
+    });
+  },
+
+  cancelEditMessage: () => set({ editingTurn: null, inputText: '' }),
+
+  retryMessage: async (messageId) => {
+    const conversationId = get().currentConversationId;
+    if (!conversationId || get().isConversationStreaming(conversationId)) return;
+    const conversation = get().conversations.find((item) => item.id === conversationId);
+    const workspaceId = String(conversation?.metadata?.workspace_id || conversation?.metadata?.project_id || conversationId);
+    try {
+      const replay = await retryTimelineTurn(workspaceId, conversationId, messageId);
+      if (!replay.success) throw new Error(replay.error || 'Retry rollback failed');
+      const message =
+        replay.payload?.message ||
+        messagesForConversation(get(), conversationId).find((item) => item.id === messageId)?.content ||
+        '';
+      // Restore references from the rollback payload so the new send includes them.
+      const restoredRefs = (replay.payload?.references ?? []) as Reference[];
+      if (restoredRefs.length > 0) {
+        useReferenceStore.getState().setReferences(restoredRefs);
+      } else {
+        useReferenceStore.getState().clearReferences();
+      }
+      set((state) => ({
+        ...setConversationMessages(
+          state,
+          conversationId,
+          visibleMessagesBeforeTurn(messagesForConversation(state, conversationId), messageId),
+        ),
+        editingTurn: null,
+        inputText: '',
+      }));
+      await get().sendMessage(message, {
+        restoredFiles: (replay.payload?.resources as UploadedFileMeta[] | undefined) ?? [],
+        targetConversationId: conversationId,
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      set({ apiError: detail });
+      get().addMessage(
+        projectErrorMessage(error, {
+          title: '重试失败',
+          message: detail,
+          errorType: 'timeline_retry_error',
+          severity: 'error',
+        }),
+      );
+    }
+  },
+
   selectConversation: async (id) => {
     const conversation = get().conversations.find((c) => c.id === id);
     if (!conversation) return;
 
-    set({ currentConversationId: id, pendingInteraction: null });
+    set((state) => {
+      const runtime = state.conversationRuntimes[id];
+      const localMessages = conversation.messages ?? [];
+      return {
+        currentConversationId: id,
+        messages: localMessages,
+        ...currentRuntimePatch({ ...state, currentConversationId: id }, state.conversationRuntimes),
+      };
+    });
+
+    const runtime = get().conversationRuntimes[id];
+    if (runtime?.isStreaming && (get().conversations.find((c) => c.id === id)?.messages?.length ?? 0) > 0) {
+      useWorkspaceStore.getState().loadWorkspace(String(conversation.metadata?.workspace_id || id));
+      void get().fetchContextUsage();
+      return;
+    }
 
     try {
       const result = await getConversationMessages(id);
@@ -1511,33 +1811,44 @@ export const useChatStore = create<ChatState>((set, get) => ({
           : [];
         const toolCalls = segmentToolCalls.length ? segmentToolCalls : persistedToolCalls;
         return {
-          id: generateId(),
+          id: m.id ? String(m.id) : generateId(),
           role,
           content: m.content,
           thinkingContent: m.thinking ?? undefined,
           segments: segments.length ? segments : undefined,
           toolCalls: toolCalls.length ? toolCalls : undefined,
           files: m.files ?? undefined,
+          references: m.references ?? undefined,
           type: 'text',
           timestamp: Date.parse(m.timestamp) || Date.now(),
           status: 'complete' as const,
         };
       });
-      set({ messages });
+      set((state) => {
+        if (state.currentConversationId !== id) return state;
+        return setConversationMessages(state, id, messages);
+      });
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
-      set({
-        messages: [
+      set((state) => ({
+        ...setConversationMessages(state, id, [
           projectErrorMessage(error, {
             title: '加载对话失败',
             message: detail,
             errorType: 'conversation_load_error',
             severity: 'error',
           }),
-        ],
+        ]),
         apiError: detail,
-      });
+      }));
     }
+
+    set((state) => {
+      if (state.currentConversationId !== id) return state;
+      return {
+        ...currentRuntimePatch(state, state.conversationRuntimes),
+      };
+    });
 
     // Load workspace file tree for this conversation. Project conversations share project workspace.
     useWorkspaceStore.getState().loadWorkspace(String(conversation.metadata?.workspace_id || id));
@@ -1564,9 +1875,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       conversations: [conversation, ...state.conversations],
       currentConversationId: conversation.id,
       messages: [],
+      isStreaming: false,
       contextUsage: null,
       apiError: null,
       pendingInteraction: null,
+      _abortController: null,
     }));
     // Load workspace for the new conversation (will be empty initially)
     useWorkspaceStore.getState().loadWorkspace(String(conversation.metadata?.workspace_id || conversation.id));
@@ -1585,9 +1898,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       conversations: [firstConversation, ...state.conversations],
       currentConversationId: firstConversation.id,
       messages: [],
+      isStreaming: false,
       contextUsage: null,
       apiError: null,
       pendingInteraction: null,
+      _abortController: null,
     }));
     useWorkspaceStore.getState().loadWorkspace(project.workspaceId || project.id);
     void useWorkspaceStore.getState().loadWorkspaceList();
@@ -1598,6 +1913,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     await apiDeleteConversation(id);
     set((state) => {
       const conversations = state.conversations.filter((c) => c.id !== id);
+      const { [id]: removedRuntime, ...conversationRuntimes } = state.conversationRuntimes;
       if (state.currentConversationId === id) {
         const first = conversations[0];
         const newId = first?.id ?? null;
@@ -1608,12 +1924,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
         else useWorkspaceStore.getState().loadWorkspace(null);
         return {
           conversations,
+          conversationRuntimes,
           currentConversationId: newId,
           messages: first?.messages ?? [],
-          pendingInteraction: null,
+          ...currentRuntimePatch({ ...state, currentConversationId: newId }, conversationRuntimes),
         };
       }
-      return { conversations };
+      return { conversations, conversationRuntimes };
     });
   },
 
@@ -1650,9 +1967,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
       else useWorkspaceStore.getState().loadWorkspace(null);
       return {
         conversations,
+        conversationRuntimes: Object.fromEntries(
+          Object.entries(state.conversationRuntimes).filter(([conversationId]) =>
+            conversations.some((conversation) => conversation.id === conversationId),
+          ),
+        ),
         currentConversationId: next,
         messages: currentStillExists ? state.messages : [],
-        pendingInteraction: null,
+        ...currentRuntimePatch(
+          { ...state, currentConversationId: next },
+          Object.fromEntries(
+            Object.entries(state.conversationRuntimes).filter(([conversationId]) =>
+              conversations.some((conversation) => conversation.id === conversationId),
+            ),
+          ),
+        ),
       };
     });
   },
@@ -1662,10 +1991,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     useWorkspaceStore.getState().loadWorkspace(null);
     set({
       conversations: [],
+      conversationRuntimes: {},
       currentConversationId: null,
       messages: [],
+      isStreaming: false,
       contextUsage: null,
       pendingInteraction: null,
+      _abortController: null,
       apiError: null,
     });
   },
@@ -1712,7 +2044,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  setIsStreaming: (v) => set({ isStreaming: v }),
+  setIsStreaming: (v) =>
+    set((state) => {
+      if (!state.currentConversationId) return { isStreaming: v };
+      const previous = state.conversationRuntimes[state.currentConversationId];
+      const conversationRuntimes = {
+        ...state.conversationRuntimes,
+        [state.currentConversationId]: {
+          isStreaming: v,
+          startedAt: previous?.startedAt ?? Date.now(),
+          assistantMessageId: previous?.assistantMessageId,
+          abortController: v ? previous?.abortController ?? null : null,
+          pendingInteraction: previous?.pendingInteraction ?? null,
+        },
+      };
+      return {
+        conversationRuntimes,
+        ...currentRuntimePatch(state, conversationRuntimes),
+      };
+    }),
 
   addAttachment: (file) =>
     set((state) => {

@@ -7,16 +7,12 @@ Provides:
 
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import User, get_current_user
 from core.config import MODEL_CONFIGS
 from core.logging import get_logger
-from db.session import get_db
 
 logger = get_logger(__name__)
 
@@ -64,28 +60,40 @@ class ModelListResponse(BaseModel):
 
 @router.get("/models", response_model=ModelListResponse)
 async def list_models(
-    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     """List all available models with their capabilities."""
-    models = [
-        ModelInfoResponse(
-            id=model_id,
-            provider=config.provider,
-            context_window=config.context_window,
-            max_output_tokens=config.max_output_tokens,
-            supports_vision=config.supports_vision,
-            supports_json_mode=config.supports_json_mode,
-            supports_thinking=config.supports_thinking,
-            supports_context_cache=config.supports_context_cache,
-            default_thinking_effort=getattr(config, "default_thinking_effort", "high"),
-        )
-        for model_id, config in MODEL_CONFIGS.items()
-    ]
+    try:
+        models = [
+            ModelInfoResponse(
+                id=str(model_id),
+                provider=str(config.provider),
+                context_window=int(config.context_window),
+                max_output_tokens=int(config.max_output_tokens),
+                supports_vision=bool(config.supports_vision),
+                supports_json_mode=bool(config.supports_json_mode),
+                supports_thinking=bool(config.supports_thinking),
+                supports_context_cache=bool(config.supports_context_cache),
+                default_thinking_effort=str(getattr(config, "default_thinking_effort", "high") or "high"),
+            )
+            for model_id, config in MODEL_CONFIGS.items()
+        ]
+    except Exception as exc:
+        logger.exception("Failed to build model list")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to load model configuration: {exc}",
+        ) from exc
+
+    current_model = (
+        "deepseek-v4-pro"
+        if "deepseek-v4-pro" in MODEL_CONFIGS
+        else (next(iter(MODEL_CONFIGS.keys()), ""))
+    )
 
     return ModelListResponse(
         models=models,
-        current_model="deepseek-v4-pro",
+        current_model=current_model,
         total=len(models),
     )
 
@@ -93,7 +101,6 @@ async def list_models(
 @router.post("/models/select")
 async def select_model(
     request: SelectModelRequest,
-    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     """Select/switch the model for a conversation.

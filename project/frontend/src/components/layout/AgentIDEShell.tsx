@@ -8,9 +8,11 @@ import { DissonanceField } from './DissonanceField';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 import { ContextToastHost } from './ContextToastHost';
+import { useChatStore } from '@/stores/chatStore';
 
 export function AgentIDEShell() {
   const { rightPanelOpen, setIsMobile } = useUIStore();
+  const hasMessages = useChatStore((state) => state.messages.length > 0);
   const panelWidth = useWorkbenchStore((state) => state.panelWidth);
   const setPanelWidth = useWorkbenchStore((state) => state.setPanelWidth);
   const dragging = useRef(false);
@@ -48,28 +50,28 @@ export function AgentIDEShell() {
   }, [setPanelWidth]);
 
   return (
-    <div className="h-screen w-screen overflow-hidden bg-[#0a0a0b] text-[#e8e6e3]">
+    <div className="h-screen w-screen overflow-hidden bg-background text-foreground">
       <DissonanceField />
       <SelectionToolbar />
       <InlineAIPrompt />
       <ContextToastHost />
       <div className="relative z-10 flex h-full">
         <Sidebar />
-        <main className="flex min-w-0 flex-1 flex-col border-l border-white/[0.055] bg-[#0e0e0f]/65 backdrop-blur-[10px]">
+        <main className="flex min-w-0 flex-1 flex-col border-l border-border/70 bg-background/72 backdrop-blur-[10px]">
           <TopBar />
           <div className="relative flex min-h-0 flex-1 flex-col">
             <MessageStream />
-            <Composer />
+            {hasMessages && <Composer />}
           </div>
         </main>
 
         {rightPanelOpen && (
           <>
             <div onMouseDown={onMouseDown} className="group relative hidden w-1.5 shrink-0 cursor-col-resize bg-transparent md:block">
-              <div className="absolute inset-y-0 left-1/2 w-px -translate-x-px bg-white/[0.06] transition-colors group-hover:bg-[#c66a38]/35" />
+              <div className="absolute inset-y-0 left-1/2 w-px -translate-x-px bg-border transition-colors group-hover:bg-primary/35" />
             </div>
             <aside
-              className="hidden h-full shrink-0 flex-col border-l border-white/[0.06] bg-[#0e0e0f]/72 shadow-[inset_1px_0_0_rgba(255,255,255,0.025)] backdrop-blur-xl md:flex"
+              className="hidden h-full shrink-0 flex-col border-l border-border bg-background/78 shadow-[inset_1px_0_0_rgba(231,225,208,0.025)] backdrop-blur-xl md:flex"
               style={{ width: panelWidth }}
             >
               <WorkbenchPanel />

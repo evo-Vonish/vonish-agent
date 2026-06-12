@@ -19,9 +19,13 @@ export function SelectionToolbar() {
   const openPrompt = useInlinePromptStore((s) => s.openPrompt);
 
   useEffect(() => {
-    const onMouseUp = () => {
+    const onMouseUp = (event: MouseEvent) => {
       const sel = getActiveSelection();
       if (!sel) return;
+      const rect =
+        sel.rect && (sel.rect.width > 0 || sel.rect.height > 0)
+          ? sel.rect
+          : { left: event.clientX, top: event.clientY, right: event.clientX, bottom: event.clientY };
       const range = window.getSelection()?.getRangeAt(0);
       const node = range?.commonAncestorContainer;
       const el = node?.nodeType === Node.ELEMENT_NODE ? (node as Element) : node?.parentElement;
@@ -32,7 +36,7 @@ export function SelectionToolbar() {
       const sourceType = (host.dataset.quoteSource || 'chat') as ReferenceSourceType;
       setSelection({
         origin: 'dom',
-        rect: sel.rect,
+        rect,
         draft: {
           sourceType,
           sourceId: host.dataset.quoteMsg || undefined,

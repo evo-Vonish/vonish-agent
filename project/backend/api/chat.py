@@ -119,7 +119,7 @@ def get_agent_loop() -> AgentLoop:
     """Get the global AgentLoop instance."""
     global _agent_loop
     if _agent_loop is None:
-        _agent_loop = AgentLoop(config=AgentLoopConfig(max_rounds=10))
+        _agent_loop = AgentLoop(config=AgentLoopConfig(max_rounds=24))
     return _agent_loop
 
 
@@ -183,6 +183,8 @@ async def chat_stream(
     if references_in:
         user_content.append({"type": "references", "references": references_in})
 
+    selected_workspace_id = request.workspace_id or conversation_id
+    user_turn_id: str | None = None
     if not request.internal_continue:
         user_msg = MessageModel(
             conversation_id=conv_uuid,
@@ -192,6 +194,18 @@ async def chat_stream(
         )
         db.add(user_msg)
         await db.commit()
+        user_turn_id = str(user_msg.id)
+        try:
+            from services.git_timeline_service import record_turn_start
+
+            await record_turn_start(
+                conversation_id,
+                selected_workspace_id,
+                user_turn_id,
+                message_preview=request.message,
+            )
+        except Exception as exc:
+            logger.warning(f"Turn start checkpoint failed: {exc}")
 
     # Collect assistant response from SSE events
     assistant_parts: list[str] = []
@@ -202,6 +216,7 @@ async def chat_stream(
     active_text_segment: dict[str, Any] | None = None
     execution_segments_by_id: dict[str, dict[str, Any]] = {}
     active_execution_segment_id: str | None = None
+    turn_final_status = "completed"
 
     # Streaming XML tool-call filter state machine
     _xml_buf = ""       # buffered partial text for filtering
@@ -580,7 +595,7 @@ async def chat_stream(
 
     async def event_generator():
         """Generate SSE events from the agent loop and collect response."""
-        nonlocal assistant_parts, thinking_parts
+        nonlocal assistant_parts, thinking_parts, turn_final_status
         queue: _asyncio.Queue[str | None] = _asyncio.Queue()
 
         async def _produce_events() -> None:
@@ -662,6 +677,7 @@ async def chat_stream(
                 elif event_name == "step_end":
                     _end_execution_step(event_data)
                 elif event_name == "workflow_error":
+                    turn_final_status = "failed"
                     _append_workflow_error(event_data)
                 elif event_name == "artifact_open":
                     _append_artifact_segment(event_data)
@@ -688,12 +704,14 @@ async def chat_stream(
                     if active_execution_segment_id is None:
                         _finish_tool_call(event_data)
                 elif event_name == "error":
+                    turn_final_status = "failed"
                     _finish_thinking()
                     _append_workflow_error_segment(
                         event_data,
                         str(event_data.get("detail") or "工作流异常中断。"),
                     )
                 elif event_name == "aborted":
+                    turn_final_status = "cancelled"
                     _finish_thinking()
                     _append_workflow_error_segment(
                         {
@@ -737,6 +755,18 @@ async def chat_stream(
             )
             db.add(assistant_msg)
             await db.commit()
+        if user_turn_id:
+            try:
+                from services.git_timeline_service import record_turn_end
+
+                await record_turn_end(
+                    conversation_id,
+                    selected_workspace_id,
+                    user_turn_id,
+                    status=turn_final_status,
+                )
+            except Exception as exc:
+                logger.warning(f"Turn end checkpoint failed: {exc}")
 
     return StreamingResponse(
         event_generator(),

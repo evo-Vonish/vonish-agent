@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 from typing import Any
 
 from core.config import settings
+from services.git_runtime import GitRuntimeManager
 
 
 class WorkspaceGitError(ValueError):
@@ -41,25 +41,7 @@ def safe_file_arg(root: Path, file_path: str | None) -> str | None:
 
 
 async def run_git(root: Path, *args: str, timeout: float = 20.0) -> tuple[int, str, str]:
-    process = await asyncio.create_subprocess_exec(
-        "git",
-        "-C",
-        str(root),
-        *args,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    try:
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
-    except asyncio.TimeoutError:
-        process.kill()
-        await process.wait()
-        return 124, "", f"git command timed out after {timeout}s"
-    return (
-        process.returncode,
-        stdout.decode("utf-8", errors="replace"),
-        stderr.decode("utf-8", errors="replace"),
-    )
+    return await GitRuntimeManager.run(["-C", str(root), *args], cwd=root, timeout=timeout, home=root / ".vonish" / "git_home")
 
 
 async def is_git_repo(root: Path) -> bool:
@@ -77,25 +59,15 @@ async def is_git_repo(root: Path) -> bool:
 
 async def ensure_workspace(workspace_id: str, init_git: bool = True) -> dict[str, Any]:
     root = workspace_root(workspace_id)
-    initialized = False
-    if init_git and not await is_git_repo(root):
-        code, stdout, stderr = await run_git(root, "init", timeout=10.0)
-        initialized = code == 0
-        if code != 0:
-            return {
-                "workspace_id": workspace_id,
-                "root_path": str(root),
-                "exists": root.exists(),
-                "is_git_repo": False,
-                "git_initialized": False,
-                "error": stderr or stdout,
-            }
+    runtime = await GitRuntimeManager.detect()
     return {
         "workspace_id": workspace_id,
         "root_path": str(root),
         "exists": root.exists(),
         "is_git_repo": await is_git_repo(root),
-        "git_initialized": initialized,
+        "git_initialized": False,
+        "git_runtime": runtime.__dict__,
+        "message": "Workspace ensured. Runtime checkpoints use hidden Shadow Git; real workspace Git is read-only.",
     }
 
 

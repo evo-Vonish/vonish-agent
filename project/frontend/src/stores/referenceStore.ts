@@ -19,6 +19,8 @@ interface ReferenceState {
   addReference: (input: NewReference) => Reference;
   removeReference: (id: string) => void;
   clearReferences: () => void;
+  /** Replace the entire reference list (used when restoring edit/retry state). */
+  setReferences: (refs: Reference[]) => void;
   attachInstruction: (id: string, instruction: string) => void;
   /** Jump back to the original source of a reference (open tab + reveal, or scroll chat). */
   focusSource: (id: string) => void;
@@ -56,6 +58,8 @@ export const useReferenceStore = create<ReferenceState>((set, get) => ({
   removeReference: (id) => set((state) => ({ references: state.references.filter((r) => r.id !== id) })),
 
   clearReferences: () => set({ references: [] }),
+
+  setReferences: (refs) => set({ references: refs }),
 
   attachInstruction: (id, instruction) =>
     set((state) => ({ references: state.references.map((r) => (r.id === id ? { ...r, instruction } : r)) })),

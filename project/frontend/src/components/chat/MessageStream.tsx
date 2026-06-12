@@ -12,6 +12,7 @@ interface MessageStreamProps {
 
 export function MessageStream({ className }: MessageStreamProps) {
   const messages = useChatStore((s) => s.messages);
+  const editingTurn = useChatStore((s) => s.editingTurn);
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [userScrolled, setUserScrolled] = useState(false);
@@ -56,9 +57,16 @@ export function MessageStream({ className }: MessageStreamProps) {
         )}
       >
         <div className="message-stream-shell mx-auto w-full space-y-1">
-          {messages.map((msg: Message) => (
-            <MessageBubble key={msg.id} message={msg} />
-          ))}
+          {(() => {
+            // Dim all messages that follow the one being edited — they will be wiped on send.
+            const editingId = editingTurn?.messageId ?? null;
+            let pastEdit = false;
+            return messages.map((msg: Message) => {
+              const isDimmed = pastEdit;
+              if (editingId && msg.id === editingId) pastEdit = true;
+              return <MessageBubble key={msg.id} message={msg} dimmed={isDimmed} />;
+            });
+          })()}
           <div ref={bottomRef} className="h-2" />
         </div>
       </div>

@@ -14,7 +14,9 @@ export function getActiveSelection(): SelectionInfo | null {
   if (!text) return null;
   let rect: DOMRect | null = null;
   try {
-    rect = sel.getRangeAt(0).getBoundingClientRect();
+    const range = sel.getRangeAt(0);
+    const rects = Array.from(range.getClientRects()).filter((item) => item.width > 0 || item.height > 0);
+    rect = rects[rects.length - 1] ?? range.getBoundingClientRect();
   } catch {
     rect = null;
   }
@@ -50,4 +52,13 @@ export function popoverPosition(
   }
   const left = Math.min(Math.max(margin, rect.left), window.innerWidth - width - margin);
   return { left, top };
+}
+
+export function elementPopoverPosition(
+  element: Element | null,
+  width = 340,
+  height = 150,
+): { left: number; top: number } {
+  if (typeof window === 'undefined' || !element) return { left: 16, top: 16 };
+  return popoverPosition(element.getBoundingClientRect(), width, height);
 }

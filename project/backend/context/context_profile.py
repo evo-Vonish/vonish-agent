@@ -185,7 +185,7 @@ CONTEXT_PROFILE_CHEAP = ContextProfile(
     compression_level="minimal",
     safety_margin_ratio=0.0,
     output_reserve_tokens=0,
-    max_tool_result_tokens=4000,
+    max_tool_result_tokens=12000,
     enable_cycle_advance=False,
     min_recent_messages=1,
 )
@@ -201,7 +201,7 @@ CONTEXT_PROFILE_BALANCED = ContextProfile(
     compression_level="minimal",
     safety_margin_ratio=0.0,
     output_reserve_tokens=0,
-    max_tool_result_tokens=4000,
+    max_tool_result_tokens=12000,
     enable_cycle_advance=False,
     min_recent_messages=1,
 )
@@ -217,7 +217,7 @@ CONTEXT_PROFILE_MAX = ContextProfile(
     compression_level="minimal",
     safety_margin_ratio=0.0,
     output_reserve_tokens=0,
-    max_tool_result_tokens=4000,
+    max_tool_result_tokens=12000,
     enable_cycle_advance=False,
     min_recent_messages=1,
 )
@@ -233,7 +233,7 @@ CONTEXT_PROFILE_CUSTOM = ContextProfile(
     compression_level="minimal",
     safety_margin_ratio=0.0,
     output_reserve_tokens=0,
-    max_tool_result_tokens=4000,
+    max_tool_result_tokens=12000,
     enable_cycle_advance=False,
     min_recent_messages=1,
 )

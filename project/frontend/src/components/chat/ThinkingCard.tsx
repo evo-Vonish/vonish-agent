@@ -6,6 +6,7 @@ import { ExecutionCollapse } from './ExecutionCollapse';
 import { useExecutionDisclosure } from './useExecutionDisclosure';
 import { useInlinePromptStore } from '@/stores/inlinePromptStore';
 import { useReferenceStore, type NewReference } from '@/stores/referenceStore';
+import { elementPopoverPosition } from '@/lib/selectionRef';
 
 interface ThinkingCardProps {
   id?: string;
@@ -84,11 +85,11 @@ export function ThinkingCard({ id, content, className, defaultExpanded = false, 
           )}
         </button>
         {hasContent && (
-          <span className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100" data-quote-card="thinking">
+          <span className="hidden shrink-0 items-center gap-0.5 group-hover:flex group-focus-within:flex" data-quote-card="thinking">
             <button type="button" onClick={() => addReference(draft)} className="rounded p-0.5 text-[#5c5855] hover:bg-white/5 hover:text-[#e8e6e3]" title="引用完整思考">
               <MessageSquareQuote className="h-3.5 w-3.5" />
             </button>
-            <button type="button" onClick={() => openPrompt(draft, { left: Math.max(16, window.innerWidth / 2 - 170), top: Math.max(16, window.innerHeight - 250) })} className="rounded p-0.5 text-[#5c5855] hover:bg-white/5 hover:text-[#e0a072]" title="询问 AI">
+            <button type="button" onClick={(event) => openPrompt(draft, elementPopoverPosition(event.currentTarget, 340, 150))} className="rounded p-0.5 text-[#5c5855] hover:bg-white/5 hover:text-[#e0a072]" title="询问 AI">
               <Sparkles className="h-3.5 w-3.5" />
             </button>
             <button type="button" onClick={() => void navigator.clipboard?.writeText(content).catch(() => {})} className="rounded p-0.5 text-[#5c5855] hover:bg-white/5 hover:text-[#e8e6e3]" title="复制完整思考">

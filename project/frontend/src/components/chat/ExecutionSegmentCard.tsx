@@ -25,6 +25,7 @@ import { useReferenceStore, type NewReference } from '@/stores/referenceStore';
 import { SmoothStreamingText } from './SmoothStreamingText';
 import { ExecutionCollapse } from './ExecutionCollapse';
 import { useExecutionDisclosure } from './useExecutionDisclosure';
+import { elementPopoverPosition } from '@/lib/selectionRef';
 
 interface ExecutionSegmentCardProps {
   segment: ExecutionSegment;
@@ -397,7 +398,7 @@ function StepBlock({ step, last = false }: { step: ExecutionStep; last?: boolean
             )}
           </button>
           {hasDetails && (
-            <span className="ml-1 flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100" data-quote-card="execution-step">
+            <span className="ml-1 hidden shrink-0 items-center gap-0.5 group-hover:flex group-focus-within:flex" data-quote-card="execution-step">
               <button
                 type="button"
                 onClick={(event) => {
@@ -413,7 +414,7 @@ function StepBlock({ step, last = false }: { step: ExecutionStep; last?: boolean
                 type="button"
                 onClick={(event) => {
                   event.stopPropagation();
-                  openPrompt(draft, { left: Math.max(16, window.innerWidth / 2 - 170), top: Math.max(16, window.innerHeight - 250) });
+                  openPrompt(draft, elementPopoverPosition(event.currentTarget, 340, 150));
                 }}
                 className="rounded p-0.5 text-foreground-subtle hover:bg-white/5 hover:text-[#e0a072]"
                 title="询问 AI"

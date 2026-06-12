@@ -36,6 +36,9 @@ _tool_configs: dict[str, bool] = {
     "research_fetch": True,
     "deep_research": True,
     "research_status": True,
+    # Artifact skills
+    "list_artifact_skills": True,
+    "read_artifact_skill": True,
     # Human Interaction
     "set_todo_list": True,
     "expand_tool_result": True,

@@ -17,6 +17,7 @@ from typing import Any, AsyncGenerator, Literal, TypedDict
 import httpx
 from pydantic import BaseModel, Field
 
+from agent.message_sanitizer import sanitize_model_messages
 from core.config import settings
 from core.logging import get_logger
 
@@ -265,6 +266,7 @@ class DeepSeekAdapter(ModelAdapter):
         json_mode: bool,
     ) -> dict[str, Any]:
         """Build DeepSeek API request body."""
+        messages = sanitize_model_messages(messages)
         # Convert messages to DeepSeek format
         api_messages: list[dict[str, Any]] = []
 
@@ -287,6 +289,8 @@ class DeepSeekAdapter(ModelAdapter):
                 api_msg["reasoning_content"] = msg.thinking_content
             elif msg.role == "assistant" and msg.tool_calls:
                 api_msg["reasoning_content"] = "Tool calls prepared."
+            if msg.role == "assistant" and "content" not in api_msg and not msg.tool_calls:
+                api_msg["content"] = "[Historical assistant checkpoint; no visible final text was stored.]"
             if msg.tool_call_id:
                 api_msg["tool_call_id"] = msg.tool_call_id
 
@@ -586,6 +590,7 @@ class KimiAdapter(ModelAdapter):
         json_mode: bool,
     ) -> dict[str, Any]:
         """Build Kimi API request body."""
+        messages = sanitize_model_messages(messages)
         api_messages: list[dict[str, Any]] = []
 
         # Add system prompt
@@ -607,6 +612,8 @@ class KimiAdapter(ModelAdapter):
                 api_msg["reasoning_content"] = msg.thinking_content
             elif msg.role == "assistant" and msg.tool_calls:
                 api_msg["reasoning_content"] = "Tool calls prepared."
+            if msg.role == "assistant" and "content" not in api_msg and not msg.tool_calls:
+                api_msg["content"] = "[Historical assistant checkpoint; no visible final text was stored.]"
             if msg.tool_call_id:
                 api_msg["tool_call_id"] = msg.tool_call_id
 

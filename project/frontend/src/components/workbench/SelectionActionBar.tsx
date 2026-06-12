@@ -1,6 +1,7 @@
 import { Copy, MessageSquareQuote, Sparkles, X } from 'lucide-react';
 import { useInlinePromptStore } from '@/stores/inlinePromptStore';
 import { useReferenceStore, type NewReference } from '@/stores/referenceStore';
+import { elementPopoverPosition } from '@/lib/selectionRef';
 
 /**
  * Bottom inspector bar for click-selected artifact blocks (DOCX/PDF/XLSX/PPTX).
@@ -20,8 +21,8 @@ export function SelectionActionBar({ label, draft, onClear }: { label: string; d
         <MessageSquareQuote className="h-3.5 w-3.5" /> 引用
       </button>
       <button
-        onClick={() => {
-          openPrompt(draft, { left: Math.max(16, window.innerWidth / 2 - 170), top: Math.max(16, window.innerHeight - 250) });
+        onClick={(event) => {
+          openPrompt(draft, elementPopoverPosition(event.currentTarget, 340, 150));
           onClear();
         }}
         className="flex items-center gap-1 rounded-md bg-primary/15 px-2 py-1 text-[11.5px] text-[#e0a072] transition-colors hover:bg-primary/25"

@@ -1,6 +1,11 @@
 import { create } from 'zustand';
 
+export type AppMode = 'chat' | 'work' | 'code';
+
 interface UIState {
+  activeMode: AppMode;
+  setActiveMode: (mode: AppMode) => void;
+
   // Sidebar
   sidebarOpen: boolean;
   sidebarWidth: number;
@@ -30,6 +35,9 @@ const MIN_SIDEBAR_WIDTH = 200;
 const MAX_SIDEBAR_WIDTH = 350;
 
 export const useUIStore = create<UIState>((set) => ({
+  activeMode: 'chat',
+  setActiveMode: (mode) => set({ activeMode: mode }),
+
   sidebarOpen: true,
   sidebarWidth: 260,
   sidebarHoverOpen: false,

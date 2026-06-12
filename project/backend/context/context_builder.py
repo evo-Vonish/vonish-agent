@@ -457,13 +457,15 @@ class ContextBuilder:
                 "- Conversation messages are not compressed or summarized.",
                 f"- Thinking is retained for the latest {THINKING_RETENTION_TURNS} assistant turns.",
                 "- Tool results are compressed by default as: head + selected key sections + tail.",
+                "- read_artifact_skill results are skill instructions and stay fully visible to the model; the UI only shows a compact read summary.",
                 "- The key sections are chosen from errors, evidence, summaries, paths, URLs, headings, citations, and query-relevant paragraphs.",
                 "- The Context Memory Map is a structured recall map, not the full source text.",
                 "- Use context_map before broad recall when you need to know what can be recalled.",
                 "- Use custom_context_recall for exact tool results, chat messages, files, file ranges, grep results, shell output, diffs, constraints, plans, or artifacts.",
+                "- custom_context_recall injects recalled content into active_recalled_context for its configured turns; use it before relying on hidden exact details.",
                 "- Use focus_tool_results to expand specific stored outputs by id, tool name, status, latest count, or grep/query text.",
                 "- Use expand_tool_result only when one exact complete stored result is required.",
-                "- Use recall_maximum or CRAZY_for_tool_results only at synthesis/audit/debug moments when broad stored evidence should be visible for a short window.",
+                "- Use recall_maximum when constraints, chat, plans, and tool evidence should be broadly rebuilt; use CRAZY_for_tool_results only when all stored tool outputs must be fully visible.",
                 "- Expansion windows expire after their configured context-build count; renew them only when full recall remains necessary.",
                 "",
                 "## Context Compression Awareness",
@@ -472,6 +474,15 @@ class ContextBuilder:
                 "- Before code edits, recall exact file content or relevant file ranges.",
                 "- Before final reports or factual claims, recall original evidence and source URLs.",
                 "- Before complex debugging, recall detailed logs, relevant code, and prior failed tool results.",
+                "",
+                "## Tool Failure Recovery",
+                "- A failed tool call is usually recoverable information, not a workflow failure.",
+                "- After a tool fails, read its error, stderr, hint, path, status, and metadata; then choose a different concrete action.",
+                "- Do not retry the same research URL/domain, artifact path, or shell command more than once unless new evidence changed the situation.",
+                "- If a research pipeline is degraded, summarize successful partial evidence and clearly state limitations instead of repeatedly fetching failing pages.",
+                "- If open_artifact says a file is missing, inspect the workspace/output directory and resolve the real filename before opening.",
+                "- On Windows shell_command, use PowerShell-compatible commands. Prefer create_directories or Python pathlib for filesystem operations.",
+                "- If enough work is already complete after tool results, produce the user-facing answer instead of waiting for the user to send continue.",
                 "",
                 "## Content-Type Recall Policy",
                 "- user_constraints: highest priority. Obey pinned constraints even if other history is compressed.",
@@ -679,7 +690,7 @@ class ContextBuilder:
         """Fetch the complete immutable conversation history.
 
         User and assistant messages are never dropped or rewritten. Thinking
-        content is attached only to the latest five assistant turns. Historical
+        content is attached to the latest retained assistant turns. Historical
         tool calls are reconstructed from their database records, with full
         results preserved in storage and a bounded head/tail view sent to the
         model unless the model requested a temporary expansion.
@@ -729,6 +740,8 @@ class ContextBuilder:
                     if row.role == "assistant" and row.id in thinking_ids
                     else None
                 )
+                if row.role == "assistant" and thinking_content and not content:
+                    content = "[Historical assistant thinking checkpoint; no visible final text was stored.]"
                 if not content and not thinking_content:
                     continue
                 message: dict[str, Any] = {"role": row.role, "content": content or None}

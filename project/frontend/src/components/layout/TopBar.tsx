@@ -25,7 +25,7 @@ export function TopBar({ className }: TopBarProps) {
   return (
     <header
       className={cn(
-        'z-30 flex h-10 flex-shrink-0 select-none items-center justify-between border-b border-white/[0.06] bg-[#0e0e0f]/60 px-3 backdrop-blur-xl',
+        'z-30 flex h-12 flex-shrink-0 select-none items-center justify-between border-b border-border bg-background/70 px-3 backdrop-blur-xl',
         className
       )}
     >
@@ -34,7 +34,7 @@ export function TopBar({ className }: TopBarProps) {
           <Tooltip content={sidebarOpen ? t('nav.sidebar.collapse') : t('nav.sidebar.expand')}>
             <button
               onClick={toggleSidebar}
-              className="rounded-md p-1.5 text-[#9a9590] transition-colors hover:bg-white/[0.06] hover:text-[#e8e6e3]"
+              className="rounded-md p-1.5 text-foreground-muted transition-colors hover:bg-primary/10 hover:text-primary"
             >
               <PanelLeft className="w-4 h-4" />
             </button>
@@ -44,7 +44,7 @@ export function TopBar({ className }: TopBarProps) {
           <Tooltip content={t('statusbar.more')}>
             <button
               onClick={() => setMobileSidebarOpen(true)}
-              className="rounded-md p-1.5 text-[#9a9590] transition-colors hover:bg-white/[0.06] hover:text-[#e8e6e3]"
+              className="rounded-md p-1.5 text-foreground-muted transition-colors hover:bg-primary/10 hover:text-primary"
             >
               <MessageSquare className="w-4 h-4" />
             </button>
@@ -53,26 +53,26 @@ export function TopBar({ className }: TopBarProps) {
         <Tooltip content={t('chat.new')}>
           <button
             onClick={handleNewChat}
-            className="rounded-md p-1.5 text-[#9a9590] transition-colors hover:bg-white/[0.06] hover:text-[#e8e6e3]"
+            className="rounded-md p-1.5 text-foreground-muted transition-colors hover:bg-primary/10 hover:text-primary"
           >
             <Plus className="w-4 h-4" />
           </button>
         </Tooltip>
-        <div className="mx-1 h-4 w-px bg-white/[0.08]" />
-        <span className="max-w-[200px] truncate font-mono-code text-[12px] font-medium tracking-[0.02em] text-[#9a9590] sm:max-w-[360px]">
+        <div className="mx-1 h-4 w-px bg-border" />
+        <span className="max-w-[200px] truncate font-mono-code text-[12px] font-medium tracking-[0.02em] text-foreground-muted sm:max-w-[360px]">
           {currentConv?.title ?? t('chat.title')}
         </span>
       </div>
 
       <div className="flex min-w-0 items-center gap-2">
-        <span className="hidden max-w-[220px] truncate font-mono-code text-[11px] tracking-[0.02em] text-[#5c5855] sm:block">
+        <span className="hidden max-w-[220px] truncate font-mono-code text-[11px] tracking-[0.02em] text-foreground-subtle sm:block">
           {model?.name ?? selectedModelId}
         </span>
         <Tooltip content="Settings">
           <button
             type="button"
             onClick={() => useWorkbenchStore.getState().openSpecialTab('settings')}
-            className="rounded-md p-1.5 text-[#9a9590] transition-colors hover:bg-white/[0.06] hover:text-[#e8e6e3]"
+            className="rounded-md p-1.5 text-foreground-muted transition-colors hover:bg-primary/10 hover:text-primary"
           >
             <Settings className="h-4 w-4" />
           </button>
@@ -81,7 +81,7 @@ export function TopBar({ className }: TopBarProps) {
           <button
             type="button"
             onClick={toggleRightPanel}
-            className="rounded-md p-1.5 text-[#9a9590] transition-colors hover:bg-white/[0.06] hover:text-[#e8e6e3]"
+            className="rounded-md p-1.5 text-foreground-muted transition-colors hover:bg-primary/10 hover:text-primary"
           >
             <SlidersHorizontal className="h-4 w-4" />
           </button>

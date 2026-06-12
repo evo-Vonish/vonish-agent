@@ -14,8 +14,8 @@ from collections import defaultdict
 from typing import Any
 
 MAX_CONTEXT_TOKENS = 256_000
-THINKING_RETENTION_TURNS = 5
-TOOL_RESULT_MAX_CHARS = 16_000
+THINKING_RETENTION_TURNS = 8
+TOOL_RESULT_MAX_CHARS = 48_000
 TOOL_RESULT_EXPANSION_BUILDS = 3
 
 # conversation_id -> tool result id -> remaining context builds
@@ -110,7 +110,7 @@ def extract_key_sections(
     *,
     max_chars: int,
     query: str = "",
-    max_sections: int = 6,
+    max_sections: int = 10,
 ) -> list[str]:
     """Pick useful middle sections from a long tool result."""
     text = str(content or "")
@@ -165,9 +165,9 @@ def truncate_tool_result(
         "or CRAZY_for_tool_results when a report/final synthesis needs all stored tool evidence.\n"
     )
     available = max(2, max_chars - len(marker) - 240)
-    head_chars = max(600, int(available * 0.28))
-    tail_chars = max(500, int(available * 0.22))
-    key_budget = max(600, available - head_chars - tail_chars)
+    head_chars = max(1200, int(available * 0.34))
+    tail_chars = max(1000, int(available * 0.26))
+    key_budget = max(1200, available - head_chars - tail_chars)
     key_sections = extract_key_sections(text, max_chars=key_budget)
     if key_sections:
         key_text = "\n\n".join(

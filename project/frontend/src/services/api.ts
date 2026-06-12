@@ -372,6 +372,7 @@ export async function polishText(
 }
 
 interface BackendMessage {
+  id: string;
   role: string;
   content: string;
   thinking?: string | null;
@@ -601,6 +602,97 @@ export async function getWorkspaceGitHistory(
   const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/git/history?${params}`);
   if (!response.ok) throw new Error(`Failed to load git history: HTTP ${response.status}`);
   return (await response.json()) as GitHistoryResult;
+}
+
+export interface TimelineReplayResult {
+  success: boolean;
+  mode?: 'edit' | 'retry';
+  conversation_id?: string;
+  workspace_id?: string;
+  turn_id?: string;
+  archived_message_ids?: string[];
+  payload?: {
+    message?: string;
+    resources?: UploadedFileMeta[];
+    references?: Reference[];
+  };
+  rollback?: Record<string, unknown>;
+  error?: string;
+}
+
+export async function editTimelineTurn(
+  workspaceId: string,
+  conversationId: string,
+  turnId: string,
+  message: string,
+): Promise<TimelineReplayResult> {
+  const response = await fetch(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/timeline/turns/${encodeURIComponent(turnId)}/edit`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conversation_id: conversationId, message }),
+    },
+  );
+  if (!response.ok) throw new Error(`Failed to edit turn: HTTP ${response.status}`);
+  return (await response.json()) as TimelineReplayResult;
+}
+
+export async function retryTimelineTurn(
+  workspaceId: string,
+  conversationId: string,
+  turnId: string,
+): Promise<TimelineReplayResult> {
+  const response = await fetch(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/timeline/turns/${encodeURIComponent(turnId)}/retry`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conversation_id: conversationId }),
+    },
+  );
+  if (!response.ok) throw new Error(`Failed to retry turn: HTTP ${response.status}`);
+  return (await response.json()) as TimelineReplayResult;
+}
+
+export interface ArtifactVersionItem {
+  id: string;
+  version: number;
+  label: string;
+  commit_hash: string;
+  created_at: string;
+}
+
+function encodePath(path: string): string {
+  return path.split('/').map(encodeURIComponent).join('/');
+}
+
+export async function getArtifactVersions(
+  workspaceId: string,
+  path: string,
+): Promise<{ workspace_id: string; artifact_path: string; versions: ArtifactVersionItem[] }> {
+  const response = await fetch(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/artifacts/${encodePath(path)}/versions`,
+  );
+  if (!response.ok) throw new Error(`Failed to load artifact versions: HTTP ${response.status}`);
+  return (await response.json()) as { workspace_id: string; artifact_path: string; versions: ArtifactVersionItem[] };
+}
+
+export async function restoreArtifactVersion(
+  workspaceId: string,
+  path: string,
+  version: number,
+): Promise<{ success: boolean; error?: string }> {
+  const response = await fetch(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/artifacts/${encodePath(path)}/restore-version`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ version }),
+    },
+  );
+  if (!response.ok) throw new Error(`Failed to restore artifact version: HTTP ${response.status}`);
+  return (await response.json()) as { success: boolean; error?: string };
 }
 
 /**

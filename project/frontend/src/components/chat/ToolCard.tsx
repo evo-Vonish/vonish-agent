@@ -43,6 +43,7 @@ import { SmoothStreamingText } from './SmoothStreamingText';
 import { useExecutionDisclosure } from './useExecutionDisclosure';
 import { useInlinePromptStore } from '@/stores/inlinePromptStore';
 import { useReferenceStore, type NewReference } from '@/stores/referenceStore';
+import { elementPopoverPosition } from '@/lib/selectionRef';
 
 interface ToolCardProps {
   tool: ToolCall;
@@ -82,6 +83,8 @@ const toolIconMap: Record<string, ElementType> = {
   git_commit: CheckCircle2,
   git_restore: RotateCcw,
   set_todo_list: ListChecks,
+  list_artifact_skills: Sparkles,
+  read_artifact_skill: ScrollText,
   skill_activate: Sparkles,
   approval_request: ShieldAlert,
   request_approval: ShieldAlert,
@@ -151,6 +154,8 @@ function titleForTool(name: string) {
     list_directory: 'List Directory',
     snapshot: 'Snapshot',
     set_todo_list: 'Task List',
+    list_artifact_skills: 'Artifact Skills',
+    read_artifact_skill: 'Read Artifact Skill',
     git_status: 'Git Status',
     git_diff: 'Git Diff',
     git_history: 'Git History',
@@ -288,7 +293,47 @@ function GitResultView({ tool }: { tool: ToolCall }) {
   return null;
 }
 
+function ArtifactSkillResultView({ result }: { result: unknown }) {
+  const data = resultObject(result);
+  if (!data?.artifact_skill) return null;
+  const files = Array.isArray(data.files_read) ? data.files_read as Array<Record<string, unknown>> : [];
+  const missing = Array.isArray(data.missing_files) ? data.missing_files.map(String) : [];
+  const display = resultObject(data.display);
+  return (
+    <div className="space-y-3 rounded-md bg-white/[0.035] px-3 py-3 text-xs">
+      <div>
+        <div className="text-[13px] font-semibold text-[#e8e6e3]">
+          {String(display?.title ?? `Read ${String(data.skill ?? 'artifact').toUpperCase()} skill`)}
+        </div>
+        <div className="mt-1 leading-5 text-[#9a9590]">
+          {String(display?.summary ?? `Loaded ${files.length} skill files.`)}
+        </div>
+      </div>
+      <div className="grid gap-1.5 sm:grid-cols-2">
+        {files.map((file) => (
+          <div key={String(file.path ?? file.name)} className="flex min-w-0 items-center gap-2 rounded border border-white/[0.06] bg-black/10 px-2 py-1.5">
+            <ScrollText className="h-3.5 w-3.5 shrink-0 text-[#c66a38]" />
+            <span className="min-w-0 flex-1 truncate text-[#d8d4cf]">{String(file.name ?? 'skill file')}</span>
+            <span className="shrink-0 font-mono-code text-[10.5px] text-[#5c5855]">{String(file.chars ?? 0)} chars</span>
+          </div>
+        ))}
+      </div>
+      {missing.length > 0 && (
+        <div className="rounded border border-[#a85450]/25 bg-[#3d1f1a]/35 px-2 py-1.5 text-[#d9948f]">
+          缺失参考：{missing.join(', ')}
+        </div>
+      )}
+      <div className="text-[11px] leading-5 text-[#5c5855]">
+        Skill 原文已进入模型上下文；前端仅显示读取摘要，避免长文档占满工具卡片。
+      </div>
+    </div>
+  );
+}
+
 function DefaultResultView({ tool }: { tool: ToolCall }) {
+  if (tool.name === 'read_artifact_skill') {
+    return <ArtifactSkillResultView result={tool.result} />;
+  }
   const searchView = (tool.name.includes('search') || tool.name === 'web_fetch') ? <SearchResultView result={tool.result} /> : null;
   const gitView = <GitResultView tool={tool} />;
   if (searchView || gitView) {
@@ -303,6 +348,7 @@ function DefaultResultView({ tool }: { tool: ToolCall }) {
 }
 
 function hasStructuredResult(tool: ToolCall) {
+  if (tool.name === 'read_artifact_skill' && resultObject(tool.result)?.artifact_skill) return true;
   if (tool.name.startsWith('git_') && resultObject(tool.result)) return true;
   if ((tool.name.includes('search') || tool.name === 'web_fetch') && extractSearchResults(tool.result).length > 0) return true;
   return false;
@@ -385,11 +431,11 @@ export function ToolCard({ tool, className }: ToolCardProps) {
             style={{ transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
           />
         </button>
-        <span className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100" data-quote-card="tool">
+        <span className="hidden shrink-0 items-center gap-0.5 group-hover:flex group-focus-within:flex" data-quote-card="tool">
           <button type="button" onClick={() => addReference(draft)} className="rounded p-0.5 text-[#5c5855] hover:bg-white/5 hover:text-[#e8e6e3]" title="引用完整工具">
             <MessageSquareQuote className="h-3.5 w-3.5" />
           </button>
-          <button type="button" onClick={() => openPrompt(draft, { left: Math.max(16, window.innerWidth / 2 - 170), top: Math.max(16, window.innerHeight - 250) })} className="rounded p-0.5 text-[#5c5855] hover:bg-white/5 hover:text-[#e0a072]" title="询问 AI">
+          <button type="button" onClick={(event) => openPrompt(draft, elementPopoverPosition(event.currentTarget, 340, 150))} className="rounded p-0.5 text-[#5c5855] hover:bg-white/5 hover:text-[#e0a072]" title="询问 AI">
             <Sparkles className="h-3.5 w-3.5" />
           </button>
           <button type="button" onClick={() => void navigator.clipboard?.writeText(fullText).catch(() => {})} className="rounded p-0.5 text-[#5c5855] hover:bg-white/5 hover:text-[#e8e6e3]" title="复制完整工具">

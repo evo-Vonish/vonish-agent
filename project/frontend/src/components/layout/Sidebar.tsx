@@ -1,15 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
+  Briefcase,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Code2,
   Download,
   Folder,
   FolderPlus,
+  Loader2,
   MessageSquare,
   Pencil,
   Plus,
   Search,
+  Settings,
   Trash2,
   X,
 } from 'lucide-react';
@@ -28,12 +33,42 @@ import {
   type ConversationSearchResult,
   type ExportConversationOptions,
 } from '@/services/api';
-import { WorkspacePanel } from '@/components/workspace/WorkspacePanel';
+import { useWorkbenchStore } from '@/stores/workbenchStore';
 import { Logo } from './Logo';
 
 interface SidebarProps {
   className?: string;
 }
+
+const modeTabs = [
+  { id: 'chat' as const, label: 'Chat', icon: MessageSquare },
+  { id: 'work' as const, label: 'Work', icon: Briefcase },
+  { id: 'code' as const, label: 'Code', icon: Code2 },
+];
+
+const modeCopy = {
+  chat: {
+    newLabel: 'New chat',
+    projectTitle: 'Projects',
+    conversationTitle: 'Recents',
+    searchPlaceholder: 'Search chats',
+    clearLabel: 'Clear all projects and chats',
+  },
+  work: {
+    newLabel: 'New task',
+    projectTitle: 'Projects',
+    conversationTitle: 'Work recents',
+    searchPlaceholder: 'Search work',
+    clearLabel: 'Clear all projects and tasks',
+  },
+  code: {
+    newLabel: 'New session',
+    projectTitle: 'Projects',
+    conversationTitle: 'Code sessions',
+    searchPlaceholder: 'Search sessions',
+    clearLabel: 'Clear all projects and sessions',
+  },
+};
 
 const defaultExportOptions = (title = ''): ExportConversationOptions => ({
   format: 'html',
@@ -142,6 +177,7 @@ function ConversationRow({
   onSelect,
   onExport,
   onDelete,
+  isRunning = false,
 }: {
   conversation: Conversation;
   active: boolean;
@@ -150,6 +186,7 @@ function ConversationRow({
   onSelect: () => void;
   onExport: () => void;
   onDelete: () => void;
+  isRunning?: boolean;
 }) {
   return (
     <div
@@ -158,11 +195,11 @@ function ConversationRow({
       onClick={onSelect}
       onKeyDown={(event) => event.key === 'Enter' && onSelect()}
       className={cn(
-        'group flex min-h-9 cursor-pointer items-start gap-2 rounded-xl px-2 py-2 text-left transition-colors',
+        'group flex min-h-9 cursor-pointer items-start gap-2 rounded-md px-2 py-2 text-left transition-colors',
         nested ? 'ml-8' : 'ml-0',
         active
-          ? 'bg-white/[0.075] text-foreground shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)]'
-          : 'text-foreground-muted hover:bg-white/[0.055] hover:text-foreground',
+          ? 'bg-primary/10 text-foreground shadow-[inset_0_0_0_1px_var(--v-accent-24)]'
+          : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
       )}
     >
       <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0 text-foreground-subtle" />
@@ -178,11 +215,12 @@ function ConversationRow({
           </div>
         ) : (
           <div className="mt-0.5 truncate text-[11px] text-foreground-subtle">
-            {conversation.messageCount} 条消息 · {formatTime(conversation.updatedAt)}
+            {isRunning ? '运行中 · 后台继续' : `${conversation.messageCount} 条消息 · ${formatTime(conversation.updatedAt)}`}
           </div>
         )}
       </div>
       <div className="flex shrink-0 items-center gap-0.5">
+        {isRunning && <Loader2 className="mr-1 mt-0.5 h-3.5 w-3.5 animate-spin text-primary" />}
         <SidebarIconButton title="导出" onClick={(event) => { event.stopPropagation(); onExport(); }}>
           <Download className="h-3.5 w-3.5" />
         </SidebarIconButton>
@@ -267,15 +305,17 @@ function ExportModal({
     }
   };
 
-  return (
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
     <>
-      <div className="fixed inset-0 z-50 bg-black/55 backdrop-blur-sm" onClick={onClose} />
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="fixed inset-0 z-[90] bg-black/55 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-0 z-[91] grid place-items-center p-3 sm:p-4" onClick={onClose}>
         <div
-          className="w-full max-w-2xl overflow-hidden rounded-2xl border border-white/10 bg-[#1d1d1d] shadow-[0_24px_80px_rgba(0,0,0,0.55)]"
+          className="flex max-h-[calc(100vh-24px)] w-[min(720px,calc(100vw-24px))] min-w-0 flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#1d1d1d] shadow-[0_24px_80px_rgba(0,0,0,0.55)]"
           onClick={(event) => event.stopPropagation()}
         >
-          <div className="border-b border-white/10 bg-[radial-gradient(circle_at_20%_0%,rgba(99,102,241,0.22),transparent_34%),#202020] px-5 py-4">
+          <div className="shrink-0 border-b border-white/10 bg-[radial-gradient(circle_at_20%_0%,rgba(99,102,241,0.22),transparent_34%),#202020] px-5 py-4">
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
                 <div className="text-sm font-semibold text-foreground">导出会话模板</div>
@@ -286,7 +326,7 @@ function ExportModal({
               </button>
             </div>
           </div>
-          <div className="grid max-h-[70vh] gap-4 overflow-y-auto p-5 md:grid-cols-[220px_1fr]">
+          <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto p-4 sm:p-5 md:grid-cols-[220px_minmax(0,1fr)]">
             <div className="space-y-3">
               <div>
                 <div className="mb-1 text-[11px] font-medium text-foreground-subtle">格式</div>
@@ -357,8 +397,8 @@ function ExportModal({
               {error && <div className="rounded-xl border border-error/30 bg-error/10 px-3 py-2 text-xs text-error">{error}</div>}
             </div>
           </div>
-          <div className="flex items-center justify-between gap-3 border-t border-white/10 px-5 py-3">
-            <div className="text-[11px] text-foreground-subtle">默认使用 HTML 精美模板，适合外发；Markdown 适合归档。</div>
+          <div className="flex shrink-0 flex-col gap-3 border-t border-white/10 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0 text-[11px] text-foreground-subtle">默认使用 HTML 精美模板，适合外发；Markdown 适合归档。</div>
             <button
               type="button"
               onClick={saveBlob}
@@ -371,7 +411,8 @@ function ExportModal({
           </div>
         </div>
       </div>
-    </>
+    </>,
+    document.body,
   );
 }
 
@@ -490,6 +531,8 @@ function CreateProjectModal({
 
 export function Sidebar({ className }: SidebarProps) {
   const {
+    activeMode,
+    setActiveMode,
     sidebarOpen,
     sidebarWidth,
     setSidebarWidth,
@@ -499,10 +542,12 @@ export function Sidebar({ className }: SidebarProps) {
     isMobile,
     mobileSidebarOpen,
     setMobileSidebarOpen,
+    setRightPanelOpen,
   } = useUIStore();
   const {
     conversations,
     currentConversationId,
+    conversationRuntimes,
     selectConversation,
     deleteConversation,
     createConversation,
@@ -514,7 +559,6 @@ export function Sidebar({ className }: SidebarProps) {
   const loadWorkspaceList = useWorkspaceStore((state) => state.loadWorkspaceList);
   const setDraftWorkspaceId = useSessionDraftStore((state) => state.setWorkspaceId);
   const { t } = useI18n();
-  const [activeTab, setActiveTab] = useState<'chats' | 'files'>('chats');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<ConversationSearchResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -594,6 +638,7 @@ export function Sidebar({ className }: SidebarProps) {
 
   const looseConversations = isSearching ? displayConversations : displayConversations.filter((conversation) => !conversation.metadata?.project_id);
   const exportTarget = exportConversationId ? conversations.find((conversation) => conversation.id === exportConversationId) : undefined;
+  const copy = modeCopy[activeMode];
 
   const handleMouseDown = useCallback(
     (event: React.MouseEvent) => {
@@ -661,59 +706,85 @@ export function Sidebar({ className }: SidebarProps) {
         <div className="flex min-w-0 items-center gap-2.5">
           <Logo size={22} />
           <div className="min-w-0">
-            <div className="truncate font-mono-code text-[18px] font-bold tracking-[-0.03em] text-[#e8e6e3]">
+            <div className="truncate font-evidence-title text-[18px] font-bold text-foreground">
               VonishAgent
             </div>
-            <div className="font-mono-code text-[11.5px] tracking-[0.02em] text-[#5c5855]">
-              Agent IDE
+            <div className="font-mono-code text-[10.5px] uppercase tracking-[0.14em] text-foreground-subtle">
+              Evidence Desk
             </div>
           </div>
         </div>
         <Tooltip content="收起">
-          <button className="rounded-lg p-1.5 text-foreground-muted hover:bg-white/[0.06] hover:text-foreground" onClick={toggleSidebar}>
+          <button className="rounded-md p-1.5 text-foreground-muted transition-colors hover:bg-surface-hover hover:text-foreground" onClick={toggleSidebar}>
             <ChevronLeft className="h-4 w-4" />
           </button>
         </Tooltip>
       </div>
 
       <div className="px-2">
-        <div className="grid grid-cols-2 gap-1 rounded-xl bg-black/20 p-1">
-          <button
-            onClick={() => setActiveTab('chats')}
-            className={cn('rounded-lg px-2 py-1.5 text-xs font-medium transition-colors', activeTab === 'chats' ? 'bg-white/10 text-foreground' : 'text-foreground-muted hover:text-foreground')}
-          >
-            对话
-          </button>
-          <button
-            onClick={() => setActiveTab('files')}
-            className={cn('rounded-lg px-2 py-1.5 text-xs font-medium transition-colors', activeTab === 'files' ? 'bg-white/10 text-foreground' : 'text-foreground-muted hover:text-foreground')}
-          >
-            文件
-          </button>
+        <div className="grid grid-cols-3 gap-1 rounded-md border border-border bg-surface p-1">
+          {modeTabs.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => {
+                setActiveMode(tab.id);
+                setSearchQuery('');
+              }}
+              className={cn(
+                'flex items-center justify-center gap-1.5 rounded px-2 py-1.5 text-[12px] font-semibold transition-colors',
+                activeMode === tab.id
+                  ? 'bg-foreground/10 text-foreground shadow-[0_0_0_1px_var(--v-border-strong)]'
+                  : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
+              )}
+            >
+              <tab.icon className="h-3.5 w-3.5" />
+              {tab.label}
+            </button>
+          ))}
         </div>
       </div>
 
-      {activeTab === 'chats' ? (
-        <>
+      <>
           <div className="space-y-2 px-2 py-3">
             <button
               onClick={() => {
                 setDraftWorkspaceId(null);
                 void createConversation();
               }}
-              className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.055] px-3 py-2 text-[13px] font-medium text-foreground transition-colors hover:bg-white/[0.085]"
+              className="flex w-full items-center justify-center gap-2 rounded-md border border-border bg-surface-hover px-3 py-2 text-[13px] font-semibold text-foreground transition-colors hover:border-border-hover hover:bg-foreground/10"
             >
               <Plus className="h-4 w-4" />
-              新对话
+              {copy.newLabel}
             </button>
+            <div className="grid grid-cols-2 gap-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setRightPanelOpen(true);
+                }}
+                className="flex items-center justify-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-[11.5px] text-foreground-muted transition-colors hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
+              >
+                <Folder className="h-3.5 w-3.5" />
+                Files
+              </button>
+              <button
+                type="button"
+                onClick={() => useWorkbenchStore.getState().openSpecialTab('settings')}
+                className="flex items-center justify-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-[11.5px] text-foreground-muted transition-colors hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
+              >
+                <Settings className="h-3.5 w-3.5" />
+                Customize
+              </button>
+            </div>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-foreground-subtle" />
               <input
                 type="text"
-                placeholder={searchLoading ? '搜索中...' : t('chat.search')}
+                placeholder={searchLoading ? '搜索中...' : copy.searchPlaceholder || t('chat.search')}
                 value={searchQuery}
                 onChange={(event) => setSearchQuery(event.target.value)}
-                className="w-full rounded-xl border border-white/10 bg-black/20 py-2 pl-9 pr-3 text-[13px] text-foreground outline-none transition-colors placeholder:text-foreground-subtle focus:border-white/20 focus:bg-black/25"
+                className="w-full rounded-md border border-border bg-background/45 py-2 pl-9 pr-3 text-[13px] text-foreground outline-none transition-colors placeholder:text-foreground-subtle focus:border-primary/45 focus:bg-background/70"
               />
             </div>
           </div>
@@ -722,7 +793,7 @@ export function Sidebar({ className }: SidebarProps) {
             <div className="px-2">
               <SectionHeader
                 icon={<Folder className="h-3.5 w-3.5" />}
-                title="项目"
+                title={copy.projectTitle}
                 count={projectGroups.length}
                 expanded={projectsExpanded}
                 onToggle={() => setProjectsExpanded((value) => !value)}
@@ -743,7 +814,7 @@ export function Sidebar({ className }: SidebarProps) {
                     const expanded = expandedProjects.has(project.id);
                     return (
                       <div key={project.id}>
-                        <div className="group flex min-h-9 items-center gap-1 rounded-xl px-2 py-1 text-[13px] text-foreground-muted transition-colors hover:bg-white/[0.055] hover:text-foreground">
+                        <div className="group flex min-h-9 items-center gap-1 rounded-md px-2 py-1 text-[13px] text-foreground-muted transition-colors hover:bg-surface-hover hover:text-foreground">
                           <button className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => toggleProject(project.id)}>
                             <span className="grid h-4 w-4 place-items-center text-foreground-subtle">
                               {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
@@ -812,6 +883,7 @@ export function Sidebar({ className }: SidebarProps) {
                                 key={conversation.id}
                                 conversation={conversation}
                                 active={currentConversationId === conversation.id}
+                                isRunning={Boolean(conversationRuntimes[conversation.id]?.isStreaming)}
                                 nested
                                 onSelect={() => selectProjectConversation(conversation)}
                                 onExport={() => setExportConversationId(conversation.id)}
@@ -833,7 +905,7 @@ export function Sidebar({ className }: SidebarProps) {
           <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
             <SectionHeader
               icon={<MessageSquare className="h-3.5 w-3.5" />}
-              title={isSearching ? '搜索结果' : '对话'}
+              title={isSearching ? 'Search results' : copy.conversationTitle}
               count={looseConversations.length}
               expanded={conversationsExpanded}
               onToggle={() => setConversationsExpanded((value) => !value)}
@@ -845,6 +917,7 @@ export function Sidebar({ className }: SidebarProps) {
                     key={conversation.id}
                     conversation={conversation}
                     active={currentConversationId === conversation.id}
+                    isRunning={Boolean(conversationRuntimes[conversation.id]?.isStreaming)}
                     searchResult={isSearching ? searchResults.find((result) => result.conversation_id === conversation.id) : undefined}
                     onSelect={() => {
                       void selectConversation(conversation.id);
@@ -862,22 +935,19 @@ export function Sidebar({ className }: SidebarProps) {
           </div>
 
           {!isSearching && conversations.length > 0 && (
-            <div className="border-t border-white/8 p-2">
+            <div className="border-t border-border p-2">
               <button
-                className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-xs text-error/80 transition-colors hover:bg-error/10 hover:text-error"
+                className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-error/80 transition-colors hover:bg-error/10 hover:text-error"
                 onClick={() => {
                   if (window.confirm('清空所有项目、会话和工作目录？此操作不可撤销。')) void clearAll();
                 }}
               >
                 <Trash2 className="h-3.5 w-3.5" />
-                清空所有项目和对话
+                {copy.clearLabel}
               </button>
             </div>
           )}
         </>
-      ) : (
-        <WorkspacePanel currentConversationId={currentConversationId} />
-      )}
     </>
   );
 
@@ -887,7 +957,7 @@ export function Sidebar({ className }: SidebarProps) {
         {mobileSidebarOpen && (
           <>
             <div className="fixed inset-0 z-40 bg-black/55" onClick={() => setMobileSidebarOpen(false)} />
-            <aside className={cn('fixed bottom-0 left-0 top-0 z-50 flex w-[300px] flex-col border-r border-white/[0.06] bg-[#0e0e0f]/90 backdrop-blur-xl', className)}>
+            <aside className={cn('fixed bottom-0 left-0 top-0 z-50 flex w-[300px] flex-col border-r border-border bg-surface/95 backdrop-blur-xl', className)}>
               {sidebarBody}
             </aside>
             {createProjectOpen && <CreateProjectModal onClose={() => setCreateProjectOpen(false)} onCreate={createProjectAndExpand} />}
@@ -901,23 +971,23 @@ export function Sidebar({ className }: SidebarProps) {
   if (!sidebarOpen) {
     return (
       <div className="relative flex-shrink-0" onMouseEnter={handleMouseEnter} onMouseLeave={handleMouseLeave}>
-        <div className={cn('flex h-full w-10 flex-col items-center gap-2 border-r border-white/[0.06] bg-[#0e0e0f]/80 py-3 backdrop-blur-xl', className)}>
-          <button className="rounded-lg p-1.5 text-foreground-muted hover:bg-white/[0.07] hover:text-foreground" onClick={toggleSidebar}>
+        <div className={cn('flex h-full w-10 flex-col items-center gap-2 border-r border-border bg-surface/90 py-3 backdrop-blur-xl', className)}>
+          <button className="rounded-md p-1.5 text-foreground-muted hover:bg-primary/10 hover:text-primary" onClick={toggleSidebar}>
             <ChevronRight className="h-4 w-4" />
           </button>
-          <div className="h-px w-5 bg-white/10" />
-          <button className="rounded-lg p-1.5 text-foreground-muted hover:bg-white/[0.07] hover:text-foreground" onClick={() => void createConversation()}>
+          <div className="h-px w-5 bg-border" />
+          <button className="rounded-md p-1.5 text-foreground-muted hover:bg-primary/10 hover:text-primary" onClick={() => void createConversation()}>
             <MessageSquare className="h-4 w-4" />
           </button>
         </div>
         {sidebarHoverOpen && (
-          <div className="absolute left-full top-2 z-40 ml-2 w-[240px] overflow-hidden rounded-2xl border border-white/[0.08] bg-[#171718]/95 shadow-2xl backdrop-blur-xl">
-            <div className="border-b border-white/8 px-3 py-2 text-xs font-medium text-foreground">最近对话</div>
+          <div className="absolute left-full top-2 z-40 ml-2 w-[240px] overflow-hidden rounded-lg border border-border bg-surface/95 shadow-2xl backdrop-blur-xl">
+            <div className="border-b border-border px-3 py-2 text-xs font-medium text-foreground">最近对话</div>
             <div className="max-h-[360px] space-y-1 overflow-y-auto p-2">
               {conversations.slice(0, 8).map((conversation) => (
                 <button
                   key={conversation.id}
-                  className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-xs text-foreground-muted hover:bg-white/[0.06] hover:text-foreground"
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-foreground-muted hover:bg-surface-hover hover:text-foreground"
                   onClick={() => {
                     void selectConversation(conversation.id);
                     setSidebarHoverOpen(false);
@@ -937,7 +1007,7 @@ export function Sidebar({ className }: SidebarProps) {
 
   return (
     <aside
-      className={cn('relative flex flex-shrink-0 flex-col border-r border-white/[0.06] bg-[#0e0e0f]/82 backdrop-blur-xl', className)}
+      className={cn('relative flex flex-shrink-0 flex-col border-r border-border bg-surface/92 backdrop-blur-xl', className)}
       style={{ width: sidebarWidth }}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}

@@ -88,7 +88,7 @@ export function ContextToastHost() {
           <div className="border-t border-white/[0.07] px-4 pb-4 pt-3">
             <div className="mb-2 flex items-center gap-2 text-xs font-medium text-[#d9d2ca]">
               <BrainCircuit size={14} className="text-[#e49a69]" />
-              实时压缩明细
+              实时上下文明细
             </div>
             <div className="grid gap-2 sm:grid-cols-2">
               {componentEntries.map(([name, tokens]) => (
@@ -104,7 +104,7 @@ export function ContextToastHost() {
               </pre>
             )}
             <div className="mt-3 text-[11px] leading-5 text-[#8f8982]">
-              策略：原文保留；常规上下文只展示 tool result 的头部、关键段、尾部；需要完整内容时由 recall 工具展开。
+              策略：原文保留；常规上下文展示 tool result 的头部、关键段、尾部；需要完整内容时由 recall 工具注入主动回忆区。
             </div>
           </div>
         )}
