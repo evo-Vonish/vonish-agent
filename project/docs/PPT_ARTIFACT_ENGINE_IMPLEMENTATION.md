@@ -49,6 +49,8 @@ user request
 | `interfaces.py` | **Phase 3 abstract interfaces (declared, not implemented):** `ScreenshotInspector`, `VisualReviewProvider`, `VlmDesignJudge`, `ReferenceDeckAnalyzer`, `SvgIntermediateRenderer`. Each raises `NotImplementedError`. |
 | `parse.py` | **Phase 2:** `parse_pptx_to_slide_metas` / `parse_pptx_to_element_tree` — reverse path for the workbench element tree (group recursion, EMU→px). |
 | `patch.py` | **Phase 2:** `apply_patch(slide_ir, ElementPatch)` (deep-copy, all 7 ops) + `apply_patch_and_rerender`. |
+| `versions.py` | **Phase 2:** SlideIR snapshot store — `snapshot_version`/`list_versions`/`load_version_slides` (per-deck `versions/index.json`). |
+| `visual_qa.py` | **L2:** `run_visual_qa` + concrete `PillowScreenshotInspector`/`RuleVisualReviewProvider` — image-grounded checks on the rendered PNGs (no OCR/headless-office). |
 | `demo_decks.py` | `acceptance_deck(theme_id)` — canonical 12-slide deck covering every layout. |
 
 ### 2.2 Agent integration (existing files edited)
@@ -79,12 +81,21 @@ user request
 | Unified agent entry (`generate_presentation`) + auto-open in Workbench | ✅ wired | `tool_executor.py`, `agent_loop.py`; live tool E2E |
 | Artifact Workbench shows PPTX + PNG previews + validation grade | ✅ wired | `PptxRenderer.tsx`; `tsc`/build exit 0 |
 | PPTX parse → element tree (Phase 2) | ✅ wired | `parse.py` (round-trip verified) |
-| Element Patch protocol apply + re-render (Phase 2) | ✅ wired | `patch.py` |
-| Element-level selection/reference on PNG overlay (Phase 2) | ◑ partial | Structure mode selects via `slides_meta`; Rendered mode is a flat image (no per-element hit-testing yet) |
+| Element Patch protocol apply + re-render (Phase 2) | ✅ wired | `patch.py`; `patch_presentation` tool; `test_apply_deck_patch` |
+| Element selection on rendered PNG → reference → patch (Phase 2) | ✅ wired | `PptxRenderer.tsx` clickable overlay; reference carries `elementId`/`filePath`/`slideIndex`; `test_tool_loop_generate_patch_revert` |
+| **L2 visual QA** (image-grounded: blankness, sharpness, colour-drift, text-presence) | ✅ wired | `visual_qa.py` (concrete `ScreenshotInspector`/`VisualReviewProvider`); on by default in the tools; `test_visual_qa_*` |
+| **Version history + rollback** (SlideIR snapshots, `revert_presentation` tool + direct API + Workbench UI) | ✅ wired | `versions.py`; `engine.restore_deck_version`; `/presentations/versions`+`/revert`; `test_versions_history`, `test_restore_version` |
+| OCR round-trip in L2 | ⛔ not done | tesseract not a dependency; text-presence uses foreground-ink analysis instead (honest substitute) |
 | Reference-deck style learning | ⛔ stub | `interfaces.ReferenceDeckAnalyzer` (raises) |
-| Screenshot inspector / OCR round-trip | ⛔ stub | `interfaces.ScreenshotInspector` (raises) |
-| VLM visual review (L3) | ⛔ stub | `interfaces.VisualReviewProvider`, `VlmDesignJudge` (raise) |
+| VLM visual review (L3) | ⛔ stub | `interfaces.VlmDesignJudge` (raises) |
 | SVG → DrawingML middle layer | ⛔ stub | `interfaces.SvgIntermediateRenderer` (raises) |
+
+### Second pass (2026-06-14) — element-patch loop, L2 visual QA, version rollback
+
+- **Element-patch loop (closed):** click an element on the rendered PNG → it becomes a `slide-element` reference (`elementId`/`filePath`/`slideIndex`) → the agent calls `patch_presentation(deck_path, slide_index, operations@element_id)` → `engine.apply_deck_patch` re-renders only that deck and re-validates. New modules unchanged; new tool `patch_presentation`. Verified end-to-end through the real `ToolExecutor` (`test_tool_loop_generate_patch_revert`) and visually (cover title text+colour changed, everything else identical, grade still perfect).
+- **L2 visual QA** (`visual_qa.py`): runs on the rendered PNGs (the same ones the engine exports) — grayscale-stddev blankness, Laplacian-variance sharpness, coarse colour-histogram drift vs the theme palette, and per-text-box foreground-ink presence (catches a text element that didn't render — e.g. font/contrast failure — *without* OCR). Turns the previously-abstract `ScreenshotInspector`/`VisualReviewProvider` into concrete implementations; `VlmDesignJudge`/`ReferenceDeckAnalyzer`/`SvgIntermediateRenderer` stay reserved. On by default in `generate_presentation`/`patch_presentation`; opt-in (`visual_qa=True`) at the engine API. `RENDERED_BLANK` and `RENDER_TEXT_MISSING` are blocking; `IMAGE_BLURRY`/`COLOR_DRIFT` are warnings.
+- **Version history + rollback** (`versions.py`): every generate/patch/restore snapshots the SlideIR into `<deck>/versions/` with an `index.json`. `revert_presentation` (agent) and `POST /api/workspaces/{id}/presentations/revert` (direct Workbench, no LLM) restore a snapshot and re-render; a restore is itself versioned so you can roll forward. Workbench header shows a version dropdown + rollback; reverting re-fetches the manifest and remounts with fresh previews.
+- **Tests:** 18 PPT tests (was 13) incl. the async full-loop test; **55 backend tests** total pass; frontend `tsc` clean.
 
 Nothing in the ⛔ rows is wired into the delivery chain — by design (the brief forbids pushing unstable Phase 3 into the main pipeline).
 

@@ -39,7 +39,12 @@ from .schema import (
     SuggestedFix,
     Theme,
     ValidatorIssue,
+    VisualFinding,
 )
+from .versions import list_versions, load_version_slides, snapshot_version
+
+# image-grounded issue types that block delivery
+_VISUAL_BLOCKING = {IssueType.RENDERED_BLANK, IssueType.RENDER_TEXT_MISSING}
 
 
 def _now_iso() -> str:
@@ -87,6 +92,9 @@ def _finalize_deck(
     existing_deckspec_rel: str = "",
     scale: float = 1.0,
     max_repair_rounds: int = 3,
+    visual_qa: bool = False,
+    version_kind: str = "generate",
+    version_label: str = "",
 ) -> DeckResult:
     """Validate + repair + render + preview + persist. Shared by generate/patch."""
     # 1. validate + auto-repair (mutates SlideIR in place)
@@ -130,6 +138,27 @@ def _finalize_deck(
             if "MISSING_PREVIEW" not in report.blocking_issue_types:
                 report.blocking_issue_types.append("MISSING_PREVIEW")
 
+    # 4b. optional L2 visual QA on the rendered pixels
+    visual_findings: list[VisualFinding] = []
+    if visual_qa:
+        from .visual_qa import run_visual_qa
+        png_abs = [str(workspace_root / p.path) for p in previews]
+        visual_findings, vissues = run_visual_qa(slides, png_abs, theme)
+        for vi in vissues:
+            report.issues.append(vi)
+            report.summary.total_issues += 1
+            if vi.severity == Severity.ERROR:
+                report.summary.error_count += 1
+                if vi.type in _VISUAL_BLOCKING:
+                    report.deliverable = False
+                    if vi.type.value not in report.blocking_issue_types:
+                        report.blocking_issue_types.append(vi.type.value)
+            elif vi.severity == Severity.WARNING:
+                report.summary.warning_count += 1
+        if report.summary.error_count > 0:
+            report.delivery_grade = "blocked" if not report.deliverable else "acceptable"
+        log.append(f"visual QA: {len(vissues)} image issue(s)")
+
     # 5. slide meta for the workbench overlay
     slides_meta = [SlideMeta(slide_id=ir.slide_id, slide_index=ir.slide_index,
                              layout_id=ir.layout_id, title=_slide_title(ir),
@@ -149,6 +178,10 @@ def _finalize_deck(
         json.dumps([s.model_dump(mode="json") for s in slides], ensure_ascii=False, indent=2),
         encoding="utf-8")
 
+    # snapshot this state for version history / rollback
+    versions = snapshot_version(out_dir, slides, label=version_label or version_kind,
+                                kind=version_kind, grade=report.delivery_grade)
+
     result = DeckResult(
         artifact_id=f"ppt-{deck_id}", deck_id=deck_id,
         title=title or (_slide_title(slides[0]) if slides else ""),
@@ -158,7 +191,8 @@ def _finalize_deck(
         slide_ir_path=_rel(slideir_path, workspace_root),
         manifest_path=_rel(manifest_path, workspace_root),
         slide_count=len(slides), previews=previews, slides_meta=slides_meta,
-        validation=report, generation_log=log, created_at=_now_iso())
+        validation=report, versions=versions, visual_findings=visual_findings,
+        generation_log=log, created_at=_now_iso())
     manifest_path.write_text(result.model_dump_json(indent=2), encoding="utf-8")
     return result
 
@@ -170,6 +204,7 @@ def generate_deck(
     out_subdir: str = "outputs/ppt",
     scale: float = 1.0,
     max_repair_rounds: int = 3,
+    visual_qa: bool = False,
     theme: Theme | None = None,
 ) -> DeckResult:
     workspace_root = Path(workspace_dir).resolve()
@@ -185,7 +220,8 @@ def generate_deck(
     out_dir = workspace_root / out_subdir / deck_id
     title = spec.title or (_slide_title(slides[0]) if slides else "")
     return _finalize_deck(deck_id, title, theme, slides, workspace_root, out_dir, log,
-                          spec=spec, scale=scale, max_repair_rounds=max_repair_rounds)
+                          spec=spec, scale=scale, max_repair_rounds=max_repair_rounds,
+                          visual_qa=visual_qa, version_kind="generate", version_label="initial generate")
 
 
 def _resolve_deck_dir(workspace_root: Path, deck_path: str) -> Path:
@@ -204,6 +240,7 @@ def apply_deck_patch(
     *,
     reasoning: str = "",
     patch_scope: str = "element_only",
+    visual_qa: bool = False,
     theme: Theme | None = None,
 ) -> DeckResult:
     """Apply an element-level patch to an existing deck and re-render in place.
@@ -254,5 +291,53 @@ def apply_deck_patch(
     log = [f"patch slide {slide_index}: {len(ops)} op(s)"]
     if reasoning:
         log.append(f"reason: {reasoning[:200]}")
+    label = reasoning[:80] or f"patch slide {slide_index}"
     return _finalize_deck(deck_id, title, theme, slides, workspace_root, deck_dir, log,
-                          spec=None, existing_deckspec_rel=deck_spec_rel)
+                          spec=None, existing_deckspec_rel=deck_spec_rel,
+                          visual_qa=visual_qa, version_kind="patch", version_label=label)
+
+
+def list_deck_versions(workspace_dir: str | Path, deck_path: str) -> list[dict]:
+    """List a deck's saved versions (newest last)."""
+    workspace_root = Path(workspace_dir).resolve()
+    deck_dir = _resolve_deck_dir(workspace_root, deck_path)
+    return [v.model_dump(mode="json") for v in list_versions(deck_dir)]
+
+
+def restore_deck_version(
+    workspace_dir: str | Path,
+    deck_path: str,
+    version_id: str,
+    *,
+    visual_qa: bool = False,
+    theme: Theme | None = None,
+) -> DeckResult:
+    """Roll a deck back to a saved snapshot and re-render in place.
+
+    The restore itself is recorded as a new ``restore`` version, so history
+    stays linear (you can always roll forward again).
+    """
+    workspace_root = Path(workspace_dir).resolve()
+    deck_dir = _resolve_deck_dir(workspace_root, deck_path)
+    slides = load_version_slides(deck_dir, version_id)
+    if not slides:
+        raise ValueError(f"version {version_id} has no slides")
+    deck_id = slides[0].deck_id or deck_dir.name
+    theme = theme or get_theme_registry().get(slides[0].theme_id)
+
+    title = ""
+    deck_spec_rel = ""
+    manifest_path = deck_dir / "deck.manifest.json"
+    if manifest_path.exists():
+        try:
+            prev = json.loads(manifest_path.read_text(encoding="utf-8"))
+            title = prev.get("title", "")
+            deck_spec_rel = prev.get("deck_spec_path", "")
+        except Exception:
+            pass
+
+    log = [f"restore version {version_id}"]
+    return _finalize_deck(deck_id, title, theme, slides, workspace_root, deck_dir, log,
+                          spec=None, existing_deckspec_rel=deck_spec_rel,
+                          visual_qa=visual_qa, version_kind="restore",
+                          version_label=f"restored from {version_id}")

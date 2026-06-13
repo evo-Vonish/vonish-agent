@@ -103,6 +103,7 @@ BEHAVIOR_RULES = PromptBlock(
         "- Use list_artifact_skills if you are unsure which artifact skills are bundled.\n"
         "- To create slide decks / presentations (.pptx), you MUST use generate_presentation (the PPT Artifact Engine), NOT hand-written python-pptx in ipython. Call list_presentation_options first to choose a theme and per-slide layouts, then pass only content. The engine owns geometry, colour, fonts, and runs validation + auto-repair before delivery. If the returned validation report says deliverable=false, tell the user which slides failed and offer to regenerate — never present a blocked deck as finished.\n"
         "- When the user selects/references a slide ELEMENT in the Workbench and asks to change just that element (reword a title, recolour a shape, move/resize), use patch_presentation with the deck's deck_path, the slide_index, and operations targeting the element_id — do NOT regenerate the whole deck for a local edit.\n"
+        "- To undo deck edits / go back to an earlier state, use revert_presentation with the deck_path and a version_id from the deck's versions list (shown in the manifest). Each generate/patch is a saved version; a revert is itself versioned so you can roll forward again.\n"
     ),
 )
 

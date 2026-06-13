@@ -762,3 +762,47 @@ async def get_workspace_diff(
     diff = diff_gen.generate_workspace_diff(file_diffs)
 
     return diff.to_dict()
+
+
+# ── PPT deck version history / rollback ──────────────────────────────────────
+@router.get("/workspaces/{conversation_id}/presentations/versions")
+async def presentation_versions(
+    conversation_id: str,
+    deck_path: str,
+    user: User = Depends(get_current_user),
+):
+    """List a generated deck's saved versions (for the Workbench history UI)."""
+    from ppt_engine.engine import list_deck_versions
+
+    ws = workspace_root(conversation_id)
+    try:
+        versions = list_deck_versions(str(ws), deck_path)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"success": True, "versions": versions}
+
+
+@router.post("/workspaces/{conversation_id}/presentations/revert")
+async def presentation_revert(
+    conversation_id: str,
+    payload: dict[str, Any] = Body(...),
+    user: User = Depends(get_current_user),
+):
+    """Roll a deck back to a saved version directly from the Workbench (no agent)."""
+    import asyncio
+
+    from ppt_engine.engine import restore_deck_version
+
+    deck_path = str(payload.get("deck_path") or "").strip()
+    version_id = str(payload.get("version_id") or "").strip()
+    if not deck_path or not version_id:
+        raise HTTPException(status_code=400, detail="deck_path and version_id are required")
+    ws = workspace_root(conversation_id)
+    try:
+        result = await asyncio.to_thread(
+            lambda: restore_deck_version(str(ws), deck_path, version_id, visual_qa=True))
+    except (FileNotFoundError, KeyError):
+        raise HTTPException(status_code=404, detail=f"version {version_id} not found")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"success": True, "manifest": result.model_dump(mode="json")}

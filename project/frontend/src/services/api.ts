@@ -495,6 +495,41 @@ export async function saveWorkspaceFile(
   return (await response.json()) as { status: string; path: string; size: number };
 }
 
+// ── PPT deck version history / rollback ──
+export async function listPresentationVersions(
+  workspaceId: string,
+  deckPath: string,
+): Promise<import('@/types/ppt').DeckVersion[]> {
+  const params = new URLSearchParams({ deck_path: deckPath });
+  const response = await fetch(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/presentations/versions?${params}`,
+  );
+  if (!response.ok) throw new Error(`Failed to list versions: HTTP ${response.status}`);
+  const data = (await response.json()) as { success: boolean; versions: import('@/types/ppt').DeckVersion[] };
+  return data.versions ?? [];
+}
+
+export async function revertPresentation(
+  workspaceId: string,
+  deckPath: string,
+  versionId: string,
+): Promise<import('@/types/ppt').DeckManifest> {
+  const response = await fetch(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/presentations/revert`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deck_path: deckPath, version_id: versionId }),
+    },
+  );
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new Error(detail || `Failed to revert: HTTP ${response.status}`);
+  }
+  const data = (await response.json()) as { success: boolean; manifest: import('@/types/ppt').DeckManifest };
+  return data.manifest;
+}
+
 // ── Structured document previews (PDF / DOCX / XLSX / PPTX) ──
 export interface DocPreviewError { code: string; message: string; recoverable?: boolean; suggested_action?: string }
 

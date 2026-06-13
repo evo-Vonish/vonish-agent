@@ -123,6 +123,11 @@ class IssueType(str, Enum):
     OVERCROWDED_SLIDE = "OVERCROWDED_SLIDE"
     MISSING_PREVIEW = "MISSING_PREVIEW"
     INCONSISTENT_STYLE = "INCONSISTENT_STYLE"
+    # L2 image-grounded checks (visual QA)
+    RENDERED_BLANK = "RENDERED_BLANK"
+    IMAGE_BLURRY = "IMAGE_BLURRY"
+    COLOR_DRIFT = "COLOR_DRIFT"
+    RENDER_TEXT_MISSING = "RENDER_TEXT_MISSING"
 
 
 # ---------------------------------------------------------------------------
@@ -596,6 +601,27 @@ class SlideMeta(BaseModel):
     elements: list[ElementBox] = Field(default_factory=list)
 
 
+class DeckVersion(BaseModel):
+    """One saved snapshot of a deck's SlideIR, for version history / rollback."""
+    version_id: str = ""
+    index: int = 0
+    label: str = ""
+    kind: Literal["generate", "patch", "restore"] = "generate"
+    created_at: str = ""
+    slide_count: int = 0
+    grade: str = ""
+    slideir_path: str = ""        # workspace-relative snapshot path
+
+
+class VisualFinding(BaseModel):
+    """One L2 image-grounded observation about a rendered slide."""
+    slide_index: int = 0
+    metric: str = ""              # blankness | sharpness | color_drift | text_presence
+    score: float = 0.0
+    ok: bool = True
+    detail: str = ""
+
+
 class DeckResult(BaseModel):
     """Full output of an engine run, persisted as a sidecar manifest."""
     artifact_id: str = ""
@@ -610,6 +636,8 @@ class DeckResult(BaseModel):
     previews: list[ArtifactPreview] = Field(default_factory=list)
     slides_meta: list[SlideMeta] = Field(default_factory=list)
     validation: ValidationReport = Field(default_factory=ValidationReport)
+    versions: list[DeckVersion] = Field(default_factory=list)
+    visual_findings: list[VisualFinding] = Field(default_factory=list)
     generation_log: list[str] = Field(default_factory=list)
     created_at: str = ""
 

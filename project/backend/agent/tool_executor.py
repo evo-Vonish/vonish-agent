@@ -315,6 +315,7 @@ class ToolExecutor:
             "read_artifact_skill": self._handle_read_artifact_skill,
             "generate_presentation": self._handle_generate_presentation,
             "patch_presentation": self._handle_patch_presentation,
+            "revert_presentation": self._handle_revert_presentation,
             "list_presentation_options": self._handle_list_presentation_options,
             "delete_file": self._handle_delete_file,
             "apply_patch": self._handle_apply_patch,
@@ -685,7 +686,8 @@ class ToolExecutor:
         deck_id = f"{base[:40]}-{int(time.time())}"
         try:
             spec = build_deck_spec(title=title, theme_id=theme_id, slides=slides, deck_id=deck_id)
-            result = await asyncio.to_thread(generate_deck, spec, str(ws))
+            result = await asyncio.to_thread(
+                lambda: generate_deck(spec, str(ws), visual_qa=True))
         except Exception as exc:  # never crash the agent loop on a bad deck
             logger.exception("generate_presentation failed")
             return {"success": False, "error": f"Presentation generation failed: {exc}"}
@@ -712,6 +714,7 @@ class ToolExecutor:
             "manifestPath": result.manifest_path,
             "deckSpecPath": result.deck_spec_path,
             "slideIrPath": result.slide_ir_path,
+            "versions": [ver.model_dump() for ver in result.versions],
             "validation": {
                 "grade": v.delivery_grade,
                 "deliverable": v.deliverable,
@@ -770,8 +773,8 @@ class ToolExecutor:
         ws = self._workspace_dir(conversation_id, workspace_id)
         try:
             result = await asyncio.to_thread(
-                apply_deck_patch, str(ws), deck_path, int(slide_index),
-                operations, reasoning=reasoning)
+                lambda: apply_deck_patch(str(ws), deck_path, int(slide_index),
+                                         operations, reasoning=reasoning, visual_qa=True))
         except FileNotFoundError:
             return {"success": False, "error": (
                 "Could not find this deck's SlideIR sidecar. patch_presentation only "
@@ -780,6 +783,30 @@ class ToolExecutor:
             logger.exception("patch_presentation failed")
             return {"success": False, "error": f"Patch failed: {exc}"}
 
+        return self._presentation_payload(result, result.title, workspace_id, conversation_id, verb="patch")
+
+    async def _handle_revert_presentation(
+        self,
+        deck_path: str = "",
+        version_id: str = "",
+        conversation_id: str = "",
+        workspace_id: str | None = None,
+        **_: Any,
+    ) -> dict[str, Any]:
+        """Roll a deck back to a saved version and re-render it."""
+        from ppt_engine.engine import restore_deck_version
+
+        if not deck_path or not version_id:
+            return {"success": False, "error": "deck_path and version_id are required"}
+        ws = self._workspace_dir(conversation_id, workspace_id)
+        try:
+            result = await asyncio.to_thread(
+                lambda: restore_deck_version(str(ws), deck_path, version_id, visual_qa=True))
+        except (FileNotFoundError, KeyError):
+            return {"success": False, "error": f"Version '{version_id}' not found for this deck."}
+        except Exception as exc:
+            logger.exception("revert_presentation failed")
+            return {"success": False, "error": f"Revert failed: {exc}"}
         return self._presentation_payload(result, result.title, workspace_id, conversation_id, verb="patch")
 
     async def _handle_read_artifact_skill(

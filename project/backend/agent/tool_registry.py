@@ -621,6 +621,29 @@ def register_default_tools() -> None:
         )
     )
 
+    registry.register(
+        ToolDefinition(
+            name="revert_presentation",
+            description=(
+                "Roll a deck (made with generate_presentation) back to an earlier saved version. "
+                "Every generate/patch saves a version snapshot; the deck's manifest lists them "
+                "(version_id, kind, label). Use this when the user wants to undo edits or go back "
+                "to a prior state. The restore itself is recorded as a new version, so the user can "
+                "always roll forward again."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "deck_path": {"type": "string", "description": "Workspace-relative path to the deck's deck.pptx."},
+                    "version_id": {"type": "string", "description": "Target version id, e.g. 'v000' (from the deck's versions list)."},
+                },
+                "required": ["deck_path", "version_id"],
+            },
+            category="artifact",
+            requires_confirmation=False,
+        )
+    )
+
     # Web Search
     registry.register(
         ToolDefinition(

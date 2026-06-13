@@ -462,3 +462,151 @@ def test_apply_deck_patch_missing_deck(tmp_path):
     with _pytest.raises(FileNotFoundError):
         apply_deck_patch(tmp_path, "outputs/ppt/nope/deck.pptx", 0,
                          [{"op": "replace_text", "target": "x", "value": "y"}])
+
+
+# ---------------------------------------------------------------------------
+# Version history + rollback
+# ---------------------------------------------------------------------------
+def test_versions_history(tmp_path):
+    from ppt_engine.engine import list_deck_versions
+
+    res = generate_deck(acceptance_deck("tech-dark"), tmp_path)
+    assert [v.kind for v in res.versions] == ["generate"]
+    assert res.versions[0].version_id == "v000"
+
+    tid = next(e for e in res.slides_meta[0].elements if e.role == "title").element_id
+    upd = apply_deck_patch(tmp_path, res.pptx_path, 0,
+                           [{"op": "replace_text", "target": tid, "value": "v1"}],
+                           reasoning="first patch")
+    assert [v.kind for v in upd.versions] == ["generate", "patch"]
+    # both snapshots exist on disk
+    deck_dir = (tmp_path / res.pptx_path).parent
+    assert (deck_dir / "versions" / "v000.slideir.json").exists()
+    assert (deck_dir / "versions" / "v001.slideir.json").exists()
+    assert len(list_deck_versions(tmp_path, res.pptx_path)) == 2
+
+
+def test_restore_version(tmp_path):
+    from ppt_engine.engine import restore_deck_version
+
+    res = generate_deck(acceptance_deck("tech-dark"), tmp_path)
+    tid = next(e for e in res.slides_meta[0].elements if e.role == "title")
+    original = tid.text
+
+    apply_deck_patch(tmp_path, res.pptx_path, 0,
+                     [{"op": "replace_text", "target": tid.element_id, "value": "CHANGED"}],
+                     reasoning="change")
+    rolled = restore_deck_version(tmp_path, res.pptx_path, "v000")
+
+    # title is back to the original, and a restore version was recorded
+    restored_box = next(e for e in rolled.slides_meta[0].elements if e.element_id == tid.element_id)
+    assert restored_box.text == original
+    assert rolled.versions[-1].kind == "restore"
+    assert len(rolled.versions) == 3
+
+
+# ---------------------------------------------------------------------------
+# L2 visual QA
+# ---------------------------------------------------------------------------
+def test_visual_qa_clean_deck(tmp_path):
+    result = generate_deck(acceptance_deck("business-bluegray"), tmp_path, visual_qa=True)
+    # findings recorded for every slide & metric (12 slides x 4 metrics)
+    assert len(result.visual_findings) == 12 * 4
+    # a clean engine deck triggers no image-grounded ERROR issues
+    image_errors = [i for i in result.validation.issues
+                    if i.type in (IssueType.RENDERED_BLANK, IssueType.RENDER_TEXT_MISSING)]
+    assert image_errors == []
+    assert result.validation.deliverable is True
+
+
+def test_visual_qa_catches_invisible_text(tmp_path):
+    """Text coloured identically to the slide background renders no ink — the
+    L2 layer must catch it even though L1 (geometry) sees a valid element."""
+    from ppt_engine.preview import render_previews
+    from ppt_engine.visual_qa import run_visual_qa
+
+    theme = get_theme_registry().get("tech-dark")
+    bg = theme.tokens.background
+    elements = [
+        # a visible card so the slide is not globally blank
+        SlideElement(element_id="card", role=ElementRole.CARD, type=ElementType.SHAPE,
+                     bbox=BBox(x=80, y=80, width=300, height=160),
+                     shape_type=ShapeType.RECT,
+                     shape_style=ShapeStyle(fill=theme.tokens.surfaceElevated)),
+        # invisible text: same colour as the background, on the bare background
+        SlideElement(element_id="ghost", role=ElementRole.BODY, type=ElementType.TEXT,
+                     bbox=BBox(x=80, y=500, width=700, height=80),
+                     text="这段文字与背景同色因此根本看不见",
+                     text_style=TextStyle(fontSize=24, color=bg)),
+    ]
+    ir = SlideIR(deck_id="ghost", slide_id="ghost-s00", slide_index=0,
+                 layout_id="custom", theme_id="tech-dark",
+                 background=SlideBackground(color=bg), elements=elements)
+
+    names = render_previews([ir], theme.tokens, tmp_path)
+    findings, issues = run_visual_qa([ir], [str(tmp_path / names[0])], theme)
+
+    assert any(i.type == IssueType.RENDER_TEXT_MISSING for i in issues)
+    # and the per-metric finding marks text_presence as not ok
+    tp = next(f for f in findings if f.metric == "text_presence")
+    assert tp.ok is False
+
+
+# ---------------------------------------------------------------------------
+# End-to-end loop through the actual agent tool executor
+# ---------------------------------------------------------------------------
+@pytest.mark.anyio
+async def test_tool_loop_generate_patch_revert(tmp_path, monkeypatch):
+    """The full Workbench loop, driven through the real ToolExecutor:
+    generate_presentation -> patch_presentation -> revert_presentation,
+    plus the reference formatter the agent sees."""
+    from agent.tool_executor import ToolCallRequest, get_tool_executor
+    from agent.tool_registry import register_default_tools
+    from api.chat import _format_references
+    from core.config import settings
+
+    register_default_tools()
+    monkeypatch.setattr(settings, "workspace_root", str(tmp_path))
+    ex = get_tool_executor()
+    wid = "loopconv"
+
+    gen = await ex.execute(ToolCallRequest(
+        tool_name="generate_presentation", conversation_id=wid, workspace_id=wid,
+        arguments={"title": "Loop", "theme_id": "tech-dark", "slides": [
+            {"layout": "cover-center", "title": "原标题", "subtitle": "s", "meta": "m"},
+            {"layout": "summary-bullets", "title": "要点", "bullets": ["a", "b", "c"]},
+        ]}))
+    assert gen.success and gen.result["open_artifact"]
+    art = gen.result["artifact"]
+    deck_path = art["path"]
+    assert art["kind"] == "presentation"
+    assert len(art["versions"]) == 1
+
+    # the agent would read the selected element from the reference block:
+    ref_text = _format_references([{
+        "sourceType": "slide-element", "title": "cover title",
+        "preview": "原标题",
+        "location": {"filePath": deck_path, "slideIndex": 0, "elementId": "el-title-2"},
+    }])
+    assert "elementId=el-title-2" in ref_text
+    assert f"filePath={deck_path}" in ref_text
+
+    # find the real title element id (engine ids are stable but assert generally)
+    import json as _json
+    man = _json.loads((tmp_path / wid / art["manifestPath"]).read_text(encoding="utf-8"))
+    tid = next(e["element_id"] for e in man["slides_meta"][0]["elements"] if e["role"] == "title")
+
+    patched = await ex.execute(ToolCallRequest(
+        tool_name="patch_presentation", conversation_id=wid, workspace_id=wid,
+        arguments={"deck_path": deck_path, "slide_index": 0, "operations": [
+            {"op": "replace_text", "target": tid, "value": "新标题"}]}))
+    assert patched.success and patched.result["open_artifact"]
+    assert len(patched.result["artifact"]["versions"]) == 2
+
+    reverted = await ex.execute(ToolCallRequest(
+        tool_name="revert_presentation", conversation_id=wid, workspace_id=wid,
+        arguments={"deck_path": deck_path, "version_id": "v000"}))
+    assert reverted.success and reverted.result["open_artifact"]
+    man2 = _json.loads((tmp_path / wid / reverted.result["artifact"]["manifestPath"]).read_text(encoding="utf-8"))
+    title_now = next(e["text"] for e in man2["slides_meta"][0]["elements"] if e["element_id"] == tid)
+    assert title_now == "原标题"

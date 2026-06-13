@@ -120,6 +120,27 @@ export interface ValidationReport {
   blocking_issue_types: string[];
 }
 
+/** One saved SlideIR snapshot for version history / rollback (mirrors `DeckVersion`). */
+export interface DeckVersion {
+  version_id: string;
+  index: number;
+  label: string;
+  kind: 'generate' | 'patch' | 'restore';
+  created_at: string;
+  slide_count: number;
+  grade: string;
+  slideir_path: string;
+}
+
+/** One L2 image-grounded observation about a rendered slide (mirrors `VisualFinding`). */
+export interface VisualFinding {
+  slide_index: number;
+  metric: string;
+  score: number;
+  ok: boolean;
+  detail: string;
+}
+
 /**
  * The sidecar `deck.manifest.json` — a serialized `DeckResult`.
  * Sits next to the generated `deck.pptx`.
@@ -138,6 +159,8 @@ export interface DeckManifest {
   previews: ArtifactPreview[];
   slides_meta: SlideMeta[];
   validation: ValidationReport;
+  versions: DeckVersion[];
+  visual_findings: VisualFinding[];
   generation_log: string[];
   created_at: string;
 }

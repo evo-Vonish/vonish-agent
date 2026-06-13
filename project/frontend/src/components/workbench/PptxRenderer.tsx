@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { LayoutGrid, Quote, ShieldAlert, ShieldCheck } from 'lucide-react';
+import { History, LayoutGrid, Quote, RotateCcw, ShieldAlert, ShieldCheck } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { previewWorkspaceFile, readWorkspaceFile, type SlideElement, type SlideInfo } from '@/services/api';
+import { previewWorkspaceFile, readWorkspaceFile, revertPresentation, type SlideElement, type SlideInfo } from '@/services/api';
 import { useReferenceStore, type NewReference } from '@/stores/referenceStore';
 import { useWorkbenchStore, type WorkbenchTab } from '@/stores/workbenchStore';
 import type { DeckManifest, DeliveryGrade, ElementBox, SlideMeta } from '@/types/ppt';
@@ -58,11 +58,14 @@ function manifestPathFor(path: string | undefined): string | null {
 interface ManifestState {
   status: 'loading' | 'present' | 'absent';
   manifest: DeckManifest | null;
+  reload: () => void;
 }
 
 /** Loads the sidecar deck manifest, if one exists, for a .pptx tab. */
 function useDeckManifest(workspaceId: string | null | undefined, path: string | undefined): ManifestState {
-  const [state, setState] = useState<ManifestState>({ status: 'loading', manifest: null });
+  const [state, setState] = useState<Omit<ManifestState, 'reload'>>({ status: 'loading', manifest: null });
+  const [nonce, setNonce] = useState(0);
+  const reload = () => setNonce((n) => n + 1);
 
   useEffect(() => {
     let alive = true;
@@ -92,9 +95,9 @@ function useDeckManifest(workspaceId: string | null | undefined, path: string | 
     return () => {
       alive = false;
     };
-  }, [workspaceId, path]);
+  }, [workspaceId, path, nonce]);
 
-  return state;
+  return { ...state, reload };
 }
 
 /** Loads a workspace PNG as a data URL, caching by path across re-renders. */
@@ -159,12 +162,30 @@ type ViewMode = 'rendered' | 'structure';
  * overlay, plus a Structure mode reusing the manifest's `slides_meta` element
  * boxes for selection + 引用.
  */
-function ManifestPptxRenderer({ tab, manifest }: { tab: WorkbenchTab; manifest: DeckManifest }) {
+function ManifestPptxRenderer({ tab, manifest, onReverted }: { tab: WorkbenchTab; manifest: DeckManifest; onReverted: () => void }) {
   const [active, setActive] = useState(0);
   const [mode, setMode] = useState<ViewMode>('rendered');
   const [selEl, setSelEl] = useState<string | null>(null);
+  const [reverting, setReverting] = useState<string | null>(null);
+  const [revertError, setRevertError] = useState<string | null>(null);
   const addReference = useReferenceStore((s) => s.addReference);
   const reveal = useWorkbenchStore((s) => (s.reveal && s.reveal.tabId === tab.id ? s.reveal : null));
+
+  const versions = manifest.versions ?? [];
+  const visualFails = (manifest.visual_findings ?? []).filter((f) => !f.ok).length;
+
+  async function handleRevert(versionId: string) {
+    if (!tab.workspaceId || !tab.path || reverting) return;
+    setReverting(versionId);
+    setRevertError(null);
+    try {
+      await revertPresentation(tab.workspaceId, tab.path, versionId);
+      onReverted(); // re-fetch manifest -> parent remounts with fresh previews
+    } catch (err) {
+      setRevertError(err instanceof Error ? err.message : '回退失败');
+      setReverting(null);
+    }
+  }
 
   // previews drive the rail; slides_meta (if present) backs Structure mode.
   const previews = manifest.previews ?? [];
@@ -206,22 +227,48 @@ function ManifestPptxRenderer({ tab, manifest }: { tab: WorkbenchTab; manifest: 
         <span className="text-[#c0554d]">{errors} 错误</span>
         <span className="text-[#b8933e]">{warnings} 警告</span>
         {autoFixed > 0 && <span className="text-[#7fd6a0]">{autoFixed} 自动修复</span>}
+        {visualFails > 0 && <span className="text-[#e3bd6a]" title="L2 视觉检查未通过项">· {visualFails} 视觉</span>}
         {!manifest.validation?.deliverable && <span className="text-[#e58c87]">· 不可交付</span>}
-        <div className="ml-auto flex items-center overflow-hidden rounded-md border border-white/10">
-          <button
-            onClick={() => setMode('rendered')}
-            className={cn('px-2 py-0.5 text-[11px] transition-colors', mode === 'rendered' ? 'bg-[#c66a38] text-white' : 'text-[#9a9590] hover:bg-white/[0.06]')}
-          >
-            渲染
-          </button>
-          <button
-            onClick={() => setMode('structure')}
-            className={cn('flex items-center gap-1 px-2 py-0.5 text-[11px] transition-colors', mode === 'structure' ? 'bg-[#c66a38] text-white' : 'text-[#9a9590] hover:bg-white/[0.06]')}
-          >
-            <LayoutGrid className="h-3 w-3" /> 结构
-          </button>
+        <div className="ml-auto flex items-center gap-2">
+          {/* version history / rollback */}
+          {versions.length > 1 && (
+            <div className="flex items-center gap-1" title="版本历史 / 回退">
+              <History className="h-3 w-3 text-[#9a9590]" />
+              <select
+                value=""
+                disabled={!!reverting}
+                onChange={(e) => { if (e.target.value) void handleRevert(e.target.value); }}
+                className="max-w-[150px] rounded border border-white/10 bg-[#16161a] px-1 py-0.5 text-[11px] text-[#c8c4be] outline-none disabled:opacity-50"
+              >
+                <option value="">{reverting ? `回退中…` : `历史 (${versions.length})`}</option>
+                {[...versions].reverse().map((v) => (
+                  <option key={v.version_id} value={v.version_id}>
+                    {v.version_id} · {v.kind}{v.label ? ` · ${v.label.slice(0, 16)}` : ''}
+                  </option>
+                ))}
+              </select>
+              {reverting && <RotateCcw className="h-3 w-3 animate-spin text-[#c66a38]" />}
+            </div>
+          )}
+          <div className="flex items-center overflow-hidden rounded-md border border-white/10">
+            <button
+              onClick={() => setMode('rendered')}
+              className={cn('px-2 py-0.5 text-[11px] transition-colors', mode === 'rendered' ? 'bg-[#c66a38] text-white' : 'text-[#9a9590] hover:bg-white/[0.06]')}
+            >
+              渲染
+            </button>
+            <button
+              onClick={() => setMode('structure')}
+              className={cn('flex items-center gap-1 px-2 py-0.5 text-[11px] transition-colors', mode === 'structure' ? 'bg-[#c66a38] text-white' : 'text-[#9a9590] hover:bg-white/[0.06]')}
+            >
+              <LayoutGrid className="h-3 w-3" /> 结构
+            </button>
+          </div>
         </div>
       </div>
+      {revertError && (
+        <div className="shrink-0 border-b border-[#c0524d]/30 bg-[#2a1413] px-3 py-1 text-[11px] text-[#e58c87]">回退失败：{revertError}</div>
+      )}
 
       <div className="flex min-h-0 flex-1">
         {/* thumbnail rail */}
@@ -423,11 +470,14 @@ function StructuralPptxRenderer({ tab }: { tab: WorkbenchTab }) {
 }
 
 export function PptxRenderer({ tab }: { tab: WorkbenchTab }) {
-  const { status, manifest } = useDeckManifest(tab.workspaceId, tab.path);
+  const { status, manifest, reload } = useDeckManifest(tab.workspaceId, tab.path);
 
   // While probing for a sidecar manifest, hold off so we don't flash the
   // structural view first. (Probe is a single readWorkspaceFile call.)
   if (status === 'loading') return <CenteredMessage spinning>加载演示文稿…</CenteredMessage>;
-  if (status === 'present' && manifest) return <ManifestPptxRenderer tab={tab} manifest={manifest} />;
+  if (status === 'present' && manifest) {
+    // Key on created_at so a revert / re-render remounts with fresh PNG caches.
+    return <ManifestPptxRenderer key={manifest.created_at || 'manifest'} tab={tab} manifest={manifest} onReverted={reload} />;
+  }
   return <StructuralPptxRenderer tab={tab} />;
 }
