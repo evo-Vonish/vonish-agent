@@ -51,6 +51,9 @@ user request
 | `patch.py` | **Phase 2:** `apply_patch(slide_ir, ElementPatch)` (deep-copy, all 7 ops) + `apply_patch_and_rerender`. |
 | `versions.py` | **Phase 2:** SlideIR snapshot store — `snapshot_version`/`list_versions`/`load_version_slides` (per-deck `versions/index.json`). |
 | `visual_qa.py` | **L2:** `run_visual_qa` + concrete `PillowScreenshotInspector`/`RuleVisualReviewProvider` — image-grounded checks on the rendered PNGs (no OCR/headless-office). |
+| `design_judge.py` | **L3:** `VlmDesignJudgeProvider` (disabled/mock/local/manual) — advisory design review; honest mock heuristic, no real VLM. |
+| `reference_analyzer.py` | **Phase 3:** `RuleReferenceDeckAnalyzer` — reference .pptx → `ReferenceDeckProfile` → `profile_to_theme`. |
+| `svg_renderer.py` | **Phase 3 experimental:** `SvgSlideRenderer` — SlideIR→SVG→native PPTX route + `compare_routes`. NOT in the main chain. |
 | `demo_decks.py` | `acceptance_deck(theme_id)` — canonical 12-slide deck covering every layout. |
 
 ### 2.2 Agent integration (existing files edited)
@@ -86,9 +89,18 @@ user request
 | **L2 visual QA** (image-grounded: blankness, sharpness, colour-drift, text-presence) | ✅ wired | `visual_qa.py` (concrete `ScreenshotInspector`/`VisualReviewProvider`); on by default in the tools; `test_visual_qa_*` |
 | **Version history + rollback** (SlideIR snapshots, `revert_presentation` tool + direct API + Workbench UI) | ✅ wired | `versions.py`; `engine.restore_deck_version`; `/presentations/versions`+`/revert`; `test_versions_history`, `test_restore_version` |
 | OCR round-trip in L2 | ⛔ not done | tesseract not a dependency; text-presence uses foreground-ink analysis instead (honest substitute) |
-| Reference-deck style learning | ⛔ stub | `interfaces.ReferenceDeckAnalyzer` (raises) |
-| VLM visual review (L3) | ⛔ stub | `interfaces.VlmDesignJudge` (raises) |
-| SVG → DrawingML middle layer | ⛔ stub | `interfaces.SvgIntermediateRenderer` (raises) |
+| **Reference-deck style learning** (rule-based v1) | ✅ wired | `reference_analyzer.py`; `analyze_reference_deck` tool + `generate_presentation(reference_deck_path=…)`; `test_ppt_reference.py` |
+| **L3 design judge** (pluggable: disabled/mock/local/manual) | ◑ partial | `design_judge.py` framework wired (`review_presentation` tool, `review_deck`, advisory in manifest); **no real VLM available** so `mock` is a deterministic heuristic (honest), `local`→disabled; `test_ppt_design_judge.py` |
+| **SVG → DrawingML experimental route** | 🧪 experimental | `svg_renderer.py` (SlideIR→SVG→native editable PPTX), proven feasible; behind `experiment_svg_route` tool, **NOT in the delivery chain**; `test_ppt_svg.py` |
+
+### Third pass (2026-06-14) — Phase 3 experiments, L3 judge, reference learning, full E2E
+
+- **SVG experimental route** (`svg_renderer.py`): `SvgSlideRenderer` implements the formerly-abstract `SvgIntermediateRenderer` — `slide_to_svg` (text/rect/line/ellipse/image-placeholder, group recursion) and `svg_to_drawingml` (parses the SVG and emits **native, editable** python-pptx shapes, not a raster). `compare_routes` runs both routes: on the 12-slide tech-dark deck, direct = 149 shapes/53,870 B vs SVG = 162 shapes/47,513 B (charts/tables degrade to placeholders, text-wrap approximate, no gradients/shadows). Exposed only via the `experiment_svg_route` tool; the production renderer remains the delivery path (verified by a `svg_renderer` grep finding zero references in the main chain).
+- **L3 design judge** (`design_judge.py`): `VlmDesignJudgeProvider` implements `VlmDesignJudge` with modes **disabled / mock / local / manual** (+ `auto`→mock). There is **no VLM/API/local model in this environment**, so the only scored mode, `mock`, is a deterministic heuristic derived from L1 validator issues + L2 visual findings + slide metadata — it never claims to call a model it doesn't have; `local` honestly degrades to disabled. Wired into the engine as **advisory only** (`generate_deck(design_judge_mode=…)`, `engine.review_deck`, `review_presentation` tool) — it attaches a per-slide review (score 1-5, severity, visual_issues, suggestions) to the manifest and **never blocks delivery** (test asserts grade/deliverable unchanged).
+- **Reference deck analyzer** (`reference_analyzer.py`): `RuleReferenceDeckAnalyzer` implements `ReferenceDeckAnalyzer` — `build_profile` extracts slide count, dominant palette, fonts, title positions, element-type mix, layout hints, the nearest built-in theme, and suggested layouts into a `ReferenceDeckProfile`; `profile_to_theme` clones the nearest theme and overlays the reference palette to produce a valid `Theme`. Exposed via the `analyze_reference_deck` tool and `generate_presentation(reference_deck_path=…)`. Rule-based (no LLM/OCR).
+- **Workbench element-level UX** (`PptxRenderer.tsx`): rendered-PNG **issue overlay** (error/warning outlines, toggle), a right **inspector** with 问题 / 元素 / 版本 tabs — issue list with "定位" + "让 Agent 修复" (creates a `slide-element` reference carrying the issue as the instruction), selected-element **metadata** (id/role/type/bbox/text), and a **version history** list with per-version rollback. `chatStore` now signals a manifest refresh on `artifact_open`, so an open deck tab **auto-refreshes after an agent patch/revert**.
+- **Full E2E demo** (`project/scripts/ppt_e2e_demo.py`, reproducible): normal theme + both brand themes + reference-styled deck, each through L1+L2(+L3), with element patch → rollback, an attached L3 review, and the SVG experiment — all grade `perfect`. Output + `DEMO_SUMMARY.md` under `project/examples/ppt_demo/`.
+- **Acceptance:** **74 backend tests** pass (was 55); frontend `tsc` + `vite build` exit 0; demo generates clean.
 
 ### Second pass (2026-06-14) — element-patch loop, L2 visual QA, version rollback
 

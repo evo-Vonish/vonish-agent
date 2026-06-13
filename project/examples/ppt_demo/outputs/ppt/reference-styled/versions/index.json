@@ -1,0 +1,12 @@
+[
+  {
+    "version_id": "v000",
+    "index": 0,
+    "label": "initial generate",
+    "kind": "generate",
+    "created_at": "2026-06-13T20:27:56.049202+00:00",
+    "slide_count": 12,
+    "grade": "perfect",
+    "slideir_path": "F:/Projects/VonishAgent/project/examples/ppt_demo/outputs/ppt/reference-styled/versions/v000.slideir.json"
+  }
+]

@@ -622,6 +622,42 @@ class VisualFinding(BaseModel):
     detail: str = ""
 
 
+class DesignReview(BaseModel):
+    """One L3 design-judge review of a slide (does NOT block delivery)."""
+    slide_id: str = ""
+    slide_index: int = 0
+    score: float = 0.0            # 1-5
+    severity: Literal["info", "low", "medium", "high"] = "info"
+    visual_issues: list[str] = Field(default_factory=list)
+    suggestions: list[str] = Field(default_factory=list)
+    dimension: str = "overall"
+
+
+class DesignJudgeReport(BaseModel):
+    """L3 judge output for a deck. ``mode`` records how it was produced."""
+    enabled: bool = False
+    mode: Literal["disabled", "mock", "local", "manual"] = "disabled"
+    provider: str = ""
+    average_score: float = 0.0
+    reviews: list[DesignReview] = Field(default_factory=list)
+    summary: str = ""
+
+
+class ReferenceDeckProfile(BaseModel):
+    """Style profile extracted from a user-supplied reference .pptx."""
+    source_path: str = ""
+    slide_count: int = 0
+    aspect_ratio: str = ""
+    palette: list[str] = Field(default_factory=list)         # hex colours, by frequency
+    fonts: list[str] = Field(default_factory=list)
+    title_positions: list[str] = Field(default_factory=list)  # top|center|left ...
+    element_type_counts: dict[str, int] = Field(default_factory=dict)
+    layout_hints: list[str] = Field(default_factory=list)
+    suggested_theme_id: str = ""
+    suggested_layouts: list[str] = Field(default_factory=list)
+    notes: str = ""
+
+
 class DeckResult(BaseModel):
     """Full output of an engine run, persisted as a sidecar manifest."""
     artifact_id: str = ""
@@ -638,6 +674,7 @@ class DeckResult(BaseModel):
     validation: ValidationReport = Field(default_factory=ValidationReport)
     versions: list[DeckVersion] = Field(default_factory=list)
     visual_findings: list[VisualFinding] = Field(default_factory=list)
+    design_review: Optional[DesignJudgeReport] = None
     generation_log: list[str] = Field(default_factory=list)
     created_at: str = ""
 

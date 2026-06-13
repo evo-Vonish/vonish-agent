@@ -505,6 +505,10 @@ def register_default_tools() -> None:
                         "enum": ["tech-dark", "academic-white", "business-bluegray", "vonish-agent", "vonish-ocr"],
                         "description": "Design theme. tech-dark/vonish-agent = dark; academic-white/business-bluegray = light.",
                     },
+                    "reference_deck_path": {
+                        "type": "string",
+                        "description": "Optional workspace path to a reference .pptx whose palette/fonts should style this deck (overrides theme_id's colours). Analyze it first with analyze_reference_deck if unsure.",
+                    },
                     "filename": {"type": "string", "description": "Optional output file name (without extension)."},
                     "slides": {
                         "type": "array",
@@ -615,6 +619,74 @@ def register_default_tools() -> None:
                     "reasoning": {"type": "string", "description": "Short why-note for the edit."},
                 },
                 "required": ["deck_path", "slide_index", "operations"],
+            },
+            category="artifact",
+            requires_confirmation=False,
+        )
+    )
+
+    registry.register(
+        ToolDefinition(
+            name="analyze_reference_deck",
+            description=(
+                "Analyze a reference .pptx (e.g. one the user uploaded) and extract a style "
+                "profile: slide count, dominant palette, fonts, title positions, element mix, "
+                "layout hints, plus the nearest built-in theme and suggested layouts. Use the "
+                "returned profile (or pass the same path as reference_deck_path to "
+                "generate_presentation) to make a new deck in that style."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "deck_path": {"type": "string", "description": "Workspace-relative path to the reference .pptx."},
+                },
+                "required": ["deck_path"],
+            },
+            category="artifact",
+            requires_confirmation=False,
+        )
+    )
+
+    registry.register(
+        ToolDefinition(
+            name="review_presentation",
+            description=(
+                "Run the L3 design judge over an existing generated deck and attach a structured "
+                "design review (per-slide score 1-5, severity, visual_issues, suggestions) to its "
+                "manifest. This is ADVISORY and never blocks delivery. Modes: mock (deterministic "
+                "heuristic from the validator/visual findings — no real VLM), manual (human-review "
+                "template), disabled, local (degrades to disabled if no local model). There is no "
+                "real VLM/API in this environment; 'mock' is honestly heuristic."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "deck_path": {"type": "string", "description": "Workspace-relative path to the deck's deck.pptx."},
+                    "mode": {"type": "string", "enum": ["mock", "manual", "disabled", "local"], "default": "mock"},
+                },
+                "required": ["deck_path"],
+            },
+            category="artifact",
+            requires_confirmation=False,
+        )
+    )
+
+    registry.register(
+        ToolDefinition(
+            name="experiment_svg_route",
+            description=(
+                "EXPERIMENTAL (Phase 3, not the main pipeline): render an existing deck through the "
+                "SlideIR -> SVG -> native-DrawingML experimental route and return a comparison vs the "
+                "production python-pptx renderer (slide/shape counts, byte sizes, limitations). Writes "
+                "per-slide .svg files next to the deck. Use only to inspect the SVG middle-layer; the "
+                "delivered deck still comes from the production renderer."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "deck_path": {"type": "string", "description": "Workspace-relative path to the deck's deck.pptx."},
+                },
+                "required": ["deck_path"],
             },
             category="artifact",
             requires_confirmation=False,

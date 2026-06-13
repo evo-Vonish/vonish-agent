@@ -1,0 +1,22 @@
+[
+  {
+    "version_id": "v000",
+    "index": 0,
+    "label": "initial generate",
+    "kind": "generate",
+    "created_at": "2026-06-13T20:27:52.942158+00:00",
+    "slide_count": 12,
+    "grade": "perfect",
+    "slideir_path": "F:/Projects/VonishAgent/project/examples/ppt_demo/outputs/ppt/acceptance-vonish-agent/versions/v000.slideir.json"
+  },
+  {
+    "version_id": "v001",
+    "index": 1,
+    "label": "initial generate",
+    "kind": "generate",
+    "created_at": "2026-06-13T20:27:54.982949+00:00",
+    "slide_count": 12,
+    "grade": "perfect",
+    "slideir_path": "F:/Projects/VonishAgent/project/examples/ppt_demo/outputs/ppt/acceptance-vonish-agent/versions/v001.slideir.json"
+  }
+]

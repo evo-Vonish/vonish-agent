@@ -18,3 +18,6 @@ build/
 # OS
 .DS_Store
 frontend/dist/
+
+# PPT engine experimental SVG intermediates (regenerable via experiment_svg_route)
+examples/ppt_demo/**/svg/

@@ -316,6 +316,9 @@ class ToolExecutor:
             "generate_presentation": self._handle_generate_presentation,
             "patch_presentation": self._handle_patch_presentation,
             "revert_presentation": self._handle_revert_presentation,
+            "analyze_reference_deck": self._handle_analyze_reference_deck,
+            "review_presentation": self._handle_review_presentation,
+            "experiment_svg_route": self._handle_experiment_svg_route,
             "list_presentation_options": self._handle_list_presentation_options,
             "delete_file": self._handle_delete_file,
             "apply_patch": self._handle_apply_patch,
@@ -668,6 +671,7 @@ class ToolExecutor:
         theme_id: str = "tech-dark",
         slides: list[dict[str, Any]] | None = None,
         filename: str = "",
+        reference_deck_path: str = "",
         conversation_id: str = "",
         workspace_id: str | None = None,
         **_: Any,
@@ -682,12 +686,25 @@ class ToolExecutor:
         ws = self._workspace_dir(conversation_id, workspace_id)
         import re as _re
 
+        # optional: derive a theme from a reference deck's extracted style
+        ref_theme = None
+        if reference_deck_path:
+            try:
+                from ppt_engine.reference_analyzer import RuleReferenceDeckAnalyzer
+                ref_abs = (ws / reference_deck_path).resolve()
+                if str(ref_abs).startswith(str(ws)) and ref_abs.is_file():
+                    analyzer = RuleReferenceDeckAnalyzer()
+                    profile = await asyncio.to_thread(lambda: analyzer.build_profile(str(ref_abs)))
+                    ref_theme = analyzer.profile_to_theme(profile, base_theme_id=theme_id)
+            except Exception:
+                ref_theme = None
+
         base = _re.sub(r"[^\w\-]+", "-", (filename or title or "deck").strip()).strip("-").lower() or "deck"
         deck_id = f"{base[:40]}-{int(time.time())}"
         try:
             spec = build_deck_spec(title=title, theme_id=theme_id, slides=slides, deck_id=deck_id)
             result = await asyncio.to_thread(
-                lambda: generate_deck(spec, str(ws), visual_qa=True))
+                lambda: generate_deck(spec, str(ws), visual_qa=True, theme=ref_theme))
         except Exception as exc:  # never crash the agent loop on a bad deck
             logger.exception("generate_presentation failed")
             return {"success": False, "error": f"Presentation generation failed: {exc}"}
@@ -808,6 +825,116 @@ class ToolExecutor:
             logger.exception("revert_presentation failed")
             return {"success": False, "error": f"Revert failed: {exc}"}
         return self._presentation_payload(result, result.title, workspace_id, conversation_id, verb="patch")
+
+    async def _handle_analyze_reference_deck(
+        self,
+        deck_path: str = "",
+        conversation_id: str = "",
+        workspace_id: str | None = None,
+        **_: Any,
+    ) -> dict[str, Any]:
+        """Extract a style profile from a reference .pptx."""
+        from ppt_engine.reference_analyzer import RuleReferenceDeckAnalyzer
+
+        if not deck_path:
+            return {"success": False, "error": "deck_path is required"}
+        ws = self._workspace_dir(conversation_id, workspace_id)
+        ref_abs = (ws / deck_path).resolve()
+        if not str(ref_abs).startswith(str(ws)) or not ref_abs.is_file():
+            return {"success": False, "error": "Reference file not found in workspace"}
+        try:
+            profile = await asyncio.to_thread(
+                lambda: RuleReferenceDeckAnalyzer().build_profile(str(ref_abs)))
+        except Exception as exc:
+            return {"success": False, "error": f"Reference analysis failed: {exc}"}
+        return {
+            "success": True,
+            "profile": profile.model_dump(),
+            "guidance": (
+                "Style extracted. To make a new deck in this style, call generate_presentation with "
+                f"reference_deck_path='{deck_path}' (and theme_id='{profile.suggested_theme_id}' as the base). "
+                "Suggested layouts: " + ", ".join(profile.suggested_layouts[:6])
+            ),
+        }
+
+    async def _handle_review_presentation(
+        self,
+        deck_path: str = "",
+        mode: str = "mock",
+        conversation_id: str = "",
+        workspace_id: str | None = None,
+        **_: Any,
+    ) -> dict[str, Any]:
+        """Run the L3 design judge on an existing deck (advisory, non-blocking)."""
+        from ppt_engine.engine import review_deck
+
+        if not deck_path:
+            return {"success": False, "error": "deck_path is required"}
+        ws = self._workspace_dir(conversation_id, workspace_id)
+        try:
+            report = await asyncio.to_thread(lambda: review_deck(str(ws), deck_path, mode=mode))
+        except FileNotFoundError:
+            return {"success": False, "error": "Deck manifest not found; review only works on generated decks."}
+        except Exception as exc:
+            logger.exception("review_presentation failed")
+            return {"success": False, "error": f"Design review failed: {exc}"}
+        return {
+            "success": True,
+            "design_review": report.model_dump(),
+            "guidance": (
+                f"L3 design review ({report.mode}, provider={report.provider}, avg score "
+                f"{report.average_score:.1f}/5). This is ADVISORY and did not change deliverability. "
+                + ("Note: 'mock' is a deterministic heuristic, not a real VLM — no vision model is available here."
+                   if report.mode == "mock" else "")
+            ),
+        }
+
+    async def _handle_experiment_svg_route(
+        self,
+        deck_path: str = "",
+        conversation_id: str = "",
+        workspace_id: str | None = None,
+        **_: Any,
+    ) -> dict[str, Any]:
+        """EXPERIMENTAL: run the SlideIR->SVG->DrawingML route and compare vs production."""
+        if not deck_path:
+            return {"success": False, "error": "deck_path is required"}
+        ws = self._workspace_dir(conversation_id, workspace_id)
+
+        def _run() -> dict[str, Any]:
+            import json as _json
+            from pathlib import Path as _P
+            from ppt_engine.registry import get_theme_registry
+            from ppt_engine.schema import SlideIR
+            from ppt_engine.svg_renderer import compare_routes
+
+            p = (ws / deck_path).resolve()
+            deck_dir = p.parent if p.suffix else p
+            ir_path = deck_dir / "deck.slideir.json"
+            if not ir_path.exists():
+                raise FileNotFoundError("deck.slideir.json not found")
+            raw = _json.loads(ir_path.read_text(encoding="utf-8"))
+            slides = [SlideIR.model_validate(d) for d in raw]
+            theme = get_theme_registry().get(slides[0].theme_id if slides else None)
+            return compare_routes(slides, theme, str(deck_dir / "svg"))
+
+        try:
+            comparison = await asyncio.to_thread(_run)
+        except FileNotFoundError:
+            return {"success": False, "error": "Deck SlideIR not found; experiment only works on generated decks."}
+        except Exception as exc:
+            logger.exception("experiment_svg_route failed")
+            return {"success": False, "error": f"SVG experiment failed: {exc}"}
+        return {
+            "success": True,
+            "experimental": True,
+            "comparison": comparison,
+            "guidance": (
+                "EXPERIMENTAL SVG route ran (not the delivered deck). It proves SlideIR->SVG->native "
+                "editable PPTX is feasible; the production renderer remains the delivery path. "
+                "See per-slide .svg files written next to the deck."
+            ),
+        }
 
     async def _handle_read_artifact_skill(
         self,

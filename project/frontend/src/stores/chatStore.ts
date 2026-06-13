@@ -1263,10 +1263,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
             const artifact = normalizeArtifactRef(data, selectedWorkspaceId);
             if (artifact.path) {
               appendSegment({ id: `artifact-${artifact.id}`, type: 'artifact', artifact });
-              void useWorkbenchStore.getState().openFile(
-                artifact.workspaceId ?? selectedWorkspaceId,
-                artifact.path,
-              );
+              const wb = useWorkbenchStore.getState();
+              const wsId = artifact.workspaceId ?? selectedWorkspaceId;
+              void wb.openFile(wsId, artifact.path);
+              // If the tab is already open (e.g. agent patched/reverted a deck),
+              // openFile is a no-op for content, so signal a manifest re-fetch.
+              wb.signalArtifactRefresh(wsId, artifact.path);
             }
             return;
           }

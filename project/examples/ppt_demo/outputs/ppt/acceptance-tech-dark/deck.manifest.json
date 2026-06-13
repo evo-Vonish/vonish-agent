@@ -1659,7 +1659,7 @@
   "validation": {
     "validation_id": "val-acceptance-tech-dark",
     "deck_id": "acceptance-tech-dark",
-    "timestamp": "2026-06-13T19:10:23.118399+00:00",
+    "timestamp": "2026-06-13T20:27:58.086834+00:00",
     "repair_rounds": 0,
     "delivery_grade": "perfect",
     "deliverable": true,
@@ -1676,13 +1676,365 @@
     "issues": [],
     "blocking_issue_types": []
   },
+  "versions": [
+    {
+      "version_id": "v000",
+      "index": 0,
+      "label": "initial generate",
+      "kind": "generate",
+      "created_at": "2026-06-13T20:27:59.298566+00:00",
+      "slide_count": 12,
+      "grade": "perfect",
+      "slideir_path": "F:/Projects/VonishAgent/project/examples/ppt_demo/outputs/ppt/acceptance-tech-dark/versions/v000.slideir.json"
+    }
+  ],
+  "visual_findings": [
+    {
+      "slide_index": 0,
+      "metric": "blankness",
+      "score": 33.2,
+      "ok": true,
+      "detail": "grayscale stddev 33.2"
+    },
+    {
+      "slide_index": 0,
+      "metric": "sharpness",
+      "score": 644.11,
+      "ok": true,
+      "detail": "laplacian variance 644.1"
+    },
+    {
+      "slide_index": 0,
+      "metric": "color_drift",
+      "score": 14.0,
+      "ok": true,
+      "detail": "worst prominent colour #151515 dist 14"
+    },
+    {
+      "slide_index": 0,
+      "metric": "text_presence",
+      "score": 0.0,
+      "ok": true,
+      "detail": "0 text box(es) without rendered ink"
+    },
+    {
+      "slide_index": 1,
+      "metric": "blankness",
+      "score": 20.22,
+      "ok": true,
+      "detail": "grayscale stddev 20.2"
+    },
+    {
+      "slide_index": 1,
+      "metric": "sharpness",
+      "score": 853.7,
+      "ok": true,
+      "detail": "laplacian variance 853.7"
+    },
+    {
+      "slide_index": 1,
+      "metric": "color_drift",
+      "score": 14.0,
+      "ok": true,
+      "detail": "worst prominent colour #151515 dist 14"
+    },
+    {
+      "slide_index": 1,
+      "metric": "text_presence",
+      "score": 0.0,
+      "ok": true,
+      "detail": "0 text box(es) without rendered ink"
+    },
+    {
+      "slide_index": 2,
+      "metric": "blankness",
+      "score": 23.36,
+      "ok": true,
+      "detail": "grayscale stddev 23.4"
+    },
+    {
+      "slide_index": 2,
+      "metric": "sharpness",
+      "score": 360.61,
+      "ok": true,
+      "detail": "laplacian variance 360.6"
+    },
+    {
+      "slide_index": 2,
+      "metric": "color_drift",
+      "score": 14.0,
+      "ok": true,
+      "detail": "worst prominent colour #151515 dist 14"
+    },
+    {
+      "slide_index": 2,
+      "metric": "text_presence",
+      "score": 0.0,
+      "ok": true,
+      "detail": "0 text box(es) without rendered ink"
+    },
+    {
+      "slide_index": 3,
+      "metric": "blankness",
+      "score": 30.13,
+      "ok": true,
+      "detail": "grayscale stddev 30.1"
+    },
+    {
+      "slide_index": 3,
+      "metric": "sharpness",
+      "score": 880.11,
+      "ok": true,
+      "detail": "laplacian variance 880.1"
+    },
+    {
+      "slide_index": 3,
+      "metric": "color_drift",
+      "score": 19.0,
+      "ok": true,
+      "detail": "worst prominent colour #15153F dist 19"
+    },
+    {
+      "slide_index": 3,
+      "metric": "text_presence",
+      "score": 0.0,
+      "ok": true,
+      "detail": "0 text box(es) without rendered ink"
+    },
+    {
+      "slide_index": 4,
+      "metric": "blankness",
+      "score": 35.74,
+      "ok": true,
+      "detail": "grayscale stddev 35.7"
+    },
+    {
+      "slide_index": 4,
+      "metric": "sharpness",
+      "score": 1861.05,
+      "ok": true,
+      "detail": "laplacian variance 1861.1"
+    },
+    {
+      "slide_index": 4,
+      "metric": "color_drift",
+      "score": 19.0,
+      "ok": true,
+      "detail": "worst prominent colour #15153F dist 19"
+    },
+    {
+      "slide_index": 4,
+      "metric": "text_presence",
+      "score": 0.0,
+      "ok": true,
+      "detail": "0 text box(es) without rendered ink"
+    },
+    {
+      "slide_index": 5,
+      "metric": "blankness",
+      "score": 27.45,
+      "ok": true,
+      "detail": "grayscale stddev 27.4"
+    },
+    {
+      "slide_index": 5,
+      "metric": "sharpness",
+      "score": 638.37,
+      "ok": true,
+      "detail": "laplacian variance 638.4"
+    },
+    {
+      "slide_index": 5,
+      "metric": "color_drift",
+      "score": 19.0,
+      "ok": true,
+      "detail": "worst prominent colour #15153F dist 19"
+    },
+    {
+      "slide_index": 5,
+      "metric": "text_presence",
+      "score": 0.0,
+      "ok": true,
+      "detail": "0 text box(es) without rendered ink"
+    },
+    {
+      "slide_index": 6,
+      "metric": "blankness",
+      "score": 24.7,
+      "ok": true,
+      "detail": "grayscale stddev 24.7"
+    },
+    {
+      "slide_index": 6,
+      "metric": "sharpness",
+      "score": 597.53,
+      "ok": true,
+      "detail": "laplacian variance 597.5"
+    },
+    {
+      "slide_index": 6,
+      "metric": "color_drift",
+      "score": 14.0,
+      "ok": true,
+      "detail": "worst prominent colour #151515 dist 14"
+    },
+    {
+      "slide_index": 6,
+      "metric": "text_presence",
+      "score": 0.0,
+      "ok": true,
+      "detail": "0 text box(es) without rendered ink"
+    },
+    {
+      "slide_index": 7,
+      "metric": "blankness",
+      "score": 31.17,
+      "ok": true,
+      "detail": "grayscale stddev 31.2"
+    },
+    {
+      "slide_index": 7,
+      "metric": "sharpness",
+      "score": 1124.86,
+      "ok": true,
+      "detail": "laplacian variance 1124.9"
+    },
+    {
+      "slide_index": 7,
+      "metric": "color_drift",
+      "score": 19.0,
+      "ok": true,
+      "detail": "worst prominent colour #15153F dist 19"
+    },
+    {
+      "slide_index": 7,
+      "metric": "text_presence",
+      "score": 0.0,
+      "ok": true,
+      "detail": "0 text box(es) without rendered ink"
+    },
+    {
+      "slide_index": 8,
+      "metric": "blankness",
+      "score": 35.39,
+      "ok": true,
+      "detail": "grayscale stddev 35.4"
+    },
+    {
+      "slide_index": 8,
+      "metric": "sharpness",
+      "score": 726.4,
+      "ok": true,
+      "detail": "laplacian variance 726.4"
+    },
+    {
+      "slide_index": 8,
+      "metric": "color_drift",
+      "score": 23.0,
+      "ok": true,
+      "detail": "worst prominent colour #3F93E7 dist 23"
+    },
+    {
+      "slide_index": 8,
+      "metric": "text_presence",
+      "score": 0.0,
+      "ok": true,
+      "detail": "0 text box(es) without rendered ink"
+    },
+    {
+      "slide_index": 9,
+      "metric": "blankness",
+      "score": 26.39,
+      "ok": true,
+      "detail": "grayscale stddev 26.4"
+    },
+    {
+      "slide_index": 9,
+      "metric": "sharpness",
+      "score": 903.61,
+      "ok": true,
+      "detail": "laplacian variance 903.6"
+    },
+    {
+      "slide_index": 9,
+      "metric": "color_drift",
+      "score": 19.0,
+      "ok": true,
+      "detail": "worst prominent colour #15153F dist 19"
+    },
+    {
+      "slide_index": 9,
+      "metric": "text_presence",
+      "score": 0.0,
+      "ok": true,
+      "detail": "0 text box(es) without rendered ink"
+    },
+    {
+      "slide_index": 10,
+      "metric": "blankness",
+      "score": 36.79,
+      "ok": true,
+      "detail": "grayscale stddev 36.8"
+    },
+    {
+      "slide_index": 10,
+      "metric": "sharpness",
+      "score": 835.44,
+      "ok": true,
+      "detail": "laplacian variance 835.4"
+    },
+    {
+      "slide_index": 10,
+      "metric": "color_drift",
+      "score": 14.0,
+      "ok": true,
+      "detail": "worst prominent colour #151515 dist 14"
+    },
+    {
+      "slide_index": 10,
+      "metric": "text_presence",
+      "score": 0.0,
+      "ok": true,
+      "detail": "0 text box(es) without rendered ink"
+    },
+    {
+      "slide_index": 11,
+      "metric": "blankness",
+      "score": 36.57,
+      "ok": true,
+      "detail": "grayscale stddev 36.6"
+    },
+    {
+      "slide_index": 11,
+      "metric": "sharpness",
+      "score": 1068.08,
+      "ok": true,
+      "detail": "laplacian variance 1068.1"
+    },
+    {
+      "slide_index": 11,
+      "metric": "color_drift",
+      "score": 23.0,
+      "ok": true,
+      "detail": "worst prominent colour #3F93E7 dist 23"
+    },
+    {
+      "slide_index": 11,
+      "metric": "text_presence",
+      "score": 0.0,
+      "ok": true,
+      "detail": "0 text box(es) without rendered ink"
+    }
+  ],
+  "design_review": null,
   "generation_log": [
     "theme=tech-dark",
     "slides=12",
     "built SlideIR (149 elements)",
     "repair rounds=0, grade=perfect, errors=0, warnings=0",
     "rendered deck.pptx",
-    "exported 12 previews"
+    "exported 12 previews",
+    "visual QA: 0 image issue(s)"
   ],
-  "created_at": "2026-06-13T19:10:23.330349+00:00"
+  "created_at": "2026-06-13T20:27:59.299566+00:00"
 }

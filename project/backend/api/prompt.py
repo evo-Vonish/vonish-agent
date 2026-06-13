@@ -43,6 +43,9 @@ _tool_configs: dict[str, bool] = {
     "generate_presentation": True,
     "patch_presentation": True,
     "revert_presentation": True,
+    "analyze_reference_deck": True,
+    "review_presentation": True,
+    "experiment_svg_route": True,
     # Human Interaction
     "set_todo_list": True,
     "expand_tool_result": True,

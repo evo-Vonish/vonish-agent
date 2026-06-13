@@ -555,6 +555,34 @@ def test_visual_qa_catches_invisible_text(tmp_path):
 # ---------------------------------------------------------------------------
 # End-to-end loop through the actual agent tool executor
 # ---------------------------------------------------------------------------
+def test_design_judge_advisory_non_blocking(tmp_path):
+    """L3 judge attaches a review but NEVER changes deliverability/grade."""
+    plain = generate_deck(acceptance_deck("tech-dark"), tmp_path / "a", visual_qa=True)
+    judged = generate_deck(acceptance_deck("tech-dark"), tmp_path / "b",
+                           visual_qa=True, design_judge_mode="mock")
+    assert judged.design_review is not None
+    assert judged.design_review.mode == "mock"
+    assert len(judged.design_review.reviews) == 12
+    assert all(1.0 <= r.score <= 5.0 for r in judged.design_review.reviews)
+    # advisory: same delivery outcome as without the judge
+    assert judged.validation.deliverable == plain.validation.deliverable is True
+    assert judged.validation.delivery_grade == plain.validation.delivery_grade
+
+
+def test_review_deck_writes_manifest(tmp_path):
+    from ppt_engine.engine import review_deck
+
+    res = generate_deck(acceptance_deck("business-bluegray"), tmp_path)
+    assert res.design_review is None  # default off
+    report = review_deck(tmp_path, res.pptx_path, mode="mock")
+    assert report.mode == "mock" and len(report.reviews) == 12
+    man = json.loads((tmp_path / res.manifest_path).read_text(encoding="utf-8"))
+    assert man["design_review"] is not None
+    assert man["design_review"]["mode"] == "mock"
+    # review must not have re-rendered / changed deliverability
+    assert man["validation"]["deliverable"] is True
+
+
 @pytest.mark.anyio
 async def test_tool_loop_generate_patch_revert(tmp_path, monkeypatch):
     """The full Workbench loop, driven through the real ToolExecutor:

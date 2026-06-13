@@ -141,6 +141,27 @@ export interface VisualFinding {
   detail: string;
 }
 
+/** One L3 design-judge review of a slide (advisory — never blocks delivery). */
+export interface DesignReview {
+  slide_id: string;
+  slide_index: number;
+  score: number;
+  severity: 'info' | 'low' | 'medium' | 'high';
+  visual_issues: string[];
+  suggestions: string[];
+  dimension: string;
+}
+
+/** L3 design-judge report (mirrors `DesignJudgeReport`). */
+export interface DesignJudgeReport {
+  enabled: boolean;
+  mode: 'disabled' | 'mock' | 'local' | 'manual';
+  provider: string;
+  average_score: number;
+  reviews: DesignReview[];
+  summary: string;
+}
+
 /**
  * The sidecar `deck.manifest.json` — a serialized `DeckResult`.
  * Sits next to the generated `deck.pptx`.
@@ -161,6 +182,7 @@ export interface DeckManifest {
   validation: ValidationReport;
   versions: DeckVersion[];
   visual_findings: VisualFinding[];
+  design_review: DesignJudgeReport | null;
   generation_log: string[];
   created_at: string;
 }

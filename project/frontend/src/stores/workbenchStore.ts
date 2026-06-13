@@ -67,10 +67,14 @@ interface WorkbenchState {
   activeTabId: string | null;
   panelWidth: number;
   reveal: RevealRequest | null;
+  /** Per-(workspace:path) counter bumped when an artifact is regenerated, so
+   *  an already-open renderer (e.g. a deck after agent patch/revert) re-fetches. */
+  artifactRefresh: Record<string, number>;
 
   setPanelWidth: (width: number | ((prev: number) => number)) => void;
   setActiveTab: (id: string) => void;
   openSpecialTab: (type: 'settings' | 'state') => void;
+  signalArtifactRefresh: (workspaceId: string | null | undefined, path: string) => void;
   openFile: (
     workspaceId: string | null,
     path: string,
@@ -87,6 +91,12 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
   activeTabId: 'state',
   panelWidth: 460,
   reveal: null,
+  artifactRefresh: {},
+
+  signalArtifactRefresh: (workspaceId, path) => {
+    const key = `${workspaceId ?? ''}:${path}`;
+    set((state) => ({ artifactRefresh: { ...state.artifactRefresh, [key]: (state.artifactRefresh[key] ?? 0) + 1 } }));
+  },
 
   setPanelWidth: (width) =>
     set((state) => ({

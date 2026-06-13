@@ -93,6 +93,7 @@ def _finalize_deck(
     scale: float = 1.0,
     max_repair_rounds: int = 3,
     visual_qa: bool = False,
+    design_judge_mode: str = "disabled",
     version_kind: str = "generate",
     version_label: str = "",
 ) -> DeckResult:
@@ -165,6 +166,18 @@ def _finalize_deck(
                              preview=prev.path, elements=_element_boxes(ir))
                    for ir, prev in zip(slides, previews)]
 
+    # 5b. optional L3 design judge — advisory only, NEVER blocks delivery
+    design_review = None
+    if design_judge_mode and design_judge_mode != "disabled":
+        try:
+            from .design_judge import judge_deck
+            png_abs = [str(workspace_root / p.path) for p in previews]
+            design_review = judge_deck(slides_meta, png_abs, report,
+                                       visual_findings=visual_findings, mode=design_judge_mode)
+            log.append(f"design judge: mode={design_review.mode}, avg={design_review.average_score:.1f}")
+        except Exception:
+            design_review = None
+
     # 6. persist spec / IR / manifest sidecars
     deckspec_path = out_dir / "deck.deckspec.json"
     slideir_path = out_dir / "deck.slideir.json"
@@ -192,6 +205,7 @@ def _finalize_deck(
         manifest_path=_rel(manifest_path, workspace_root),
         slide_count=len(slides), previews=previews, slides_meta=slides_meta,
         validation=report, versions=versions, visual_findings=visual_findings,
+        design_review=design_review,
         generation_log=log, created_at=_now_iso())
     manifest_path.write_text(result.model_dump_json(indent=2), encoding="utf-8")
     return result
@@ -205,6 +219,7 @@ def generate_deck(
     scale: float = 1.0,
     max_repair_rounds: int = 3,
     visual_qa: bool = False,
+    design_judge_mode: str = "disabled",
     theme: Theme | None = None,
 ) -> DeckResult:
     workspace_root = Path(workspace_dir).resolve()
@@ -221,7 +236,8 @@ def generate_deck(
     title = spec.title or (_slide_title(slides[0]) if slides else "")
     return _finalize_deck(deck_id, title, theme, slides, workspace_root, out_dir, log,
                           spec=spec, scale=scale, max_repair_rounds=max_repair_rounds,
-                          visual_qa=visual_qa, version_kind="generate", version_label="initial generate")
+                          visual_qa=visual_qa, design_judge_mode=design_judge_mode,
+                          version_kind="generate", version_label="initial generate")
 
 
 def _resolve_deck_dir(workspace_root: Path, deck_path: str) -> Path:
@@ -341,3 +357,26 @@ def restore_deck_version(
                           spec=None, existing_deckspec_rel=deck_spec_rel,
                           visual_qa=visual_qa, version_kind="restore",
                           version_label=f"restored from {version_id}")
+
+
+def review_deck(workspace_dir: str | Path, deck_path: str, *, mode: str = "mock"):
+    """Run the L3 design judge on an EXISTING deck and write the review into its
+    manifest (advisory — does not re-render or change deliverability).
+
+    Returns a ``DesignJudgeReport``. No re-render happens; this reads the deck's
+    persisted manifest (slides_meta + previews + validation) and judges it.
+    """
+    from .design_judge import judge_deck
+
+    workspace_root = Path(workspace_dir).resolve()
+    deck_dir = _resolve_deck_dir(workspace_root, deck_path)
+    manifest_path = deck_dir / "deck.manifest.json"
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"manifest not found for deck at {deck_dir}")
+    man = json.loads(manifest_path.read_text(encoding="utf-8"))
+    png_abs = [str(workspace_root / p.get("path", "")) for p in man.get("previews", [])]
+    report = judge_deck(man.get("slides_meta", []), png_abs, man.get("validation"),
+                        visual_findings=man.get("visual_findings"), mode=mode)
+    man["design_review"] = report.model_dump(mode="json")
+    manifest_path.write_text(json.dumps(man, ensure_ascii=False, indent=2), encoding="utf-8")
+    return report

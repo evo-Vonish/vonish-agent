@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils';
 import { previewWorkspaceFile, readWorkspaceFile, revertPresentation, type SlideElement, type SlideInfo } from '@/services/api';
 import { useReferenceStore, type NewReference } from '@/stores/referenceStore';
 import { useWorkbenchStore, type WorkbenchTab } from '@/stores/workbenchStore';
-import type { DeckManifest, DeliveryGrade, ElementBox, SlideMeta } from '@/types/ppt';
+import type { DeckManifest, DeliveryGrade, ElementBox, SlideMeta, ValidatorIssue } from '@/types/ppt';
 import { useDocumentPreview } from './useDocumentPreview';
 import { SelectionActionBar } from './SelectionActionBar';
 import { CenteredMessage, ErrorView, LimitationBanner } from './RendererChrome';
@@ -46,6 +46,16 @@ function metaElementDraft(tab: WorkbenchTab, slideIndex: number, el: ElementBox)
     location: { filePath: tab.path, workspaceId: tab.workspaceId ?? undefined, slideIndex, elementId: el.element_id, blockType: el.type },
   };
 }
+function issueFixDraft(tab: WorkbenchTab, slideIndex: number, issue: ValidatorIssue, el: ElementBox | null): NewReference {
+  const fix = issue.suggested_fix?.action ? `（建议动作：${issue.suggested_fix.action}）` : '';
+  return {
+    sourceType: el ? 'slide-element' : 'slide',
+    title: `${tab.title} · S${slideIndex + 1} 修复 ${issue.type}`,
+    preview: (el?.text || issue.message).slice(0, 400),
+    instruction: `请用 patch_presentation 修复这个问题：${issue.message}${fix}`,
+    location: { filePath: tab.path, workspaceId: tab.workspaceId ?? undefined, slideIndex, elementId: el?.element_id, blockType: el?.type },
+  };
+}
 
 /** Derive `<...>/deck.manifest.json` from a `<...>/deck.pptx` path. */
 function manifestPathFor(path: string | undefined): string | null {
@@ -66,6 +76,8 @@ function useDeckManifest(workspaceId: string | null | undefined, path: string | 
   const [state, setState] = useState<Omit<ManifestState, 'reload'>>({ status: 'loading', manifest: null });
   const [nonce, setNonce] = useState(0);
   const reload = () => setNonce((n) => n + 1);
+  // re-fetch when an agent patch/revert signals this artifact changed
+  const externalRefresh = useWorkbenchStore((s) => s.artifactRefresh[`${workspaceId ?? ''}:${path ?? ''}`] ?? 0);
 
   useEffect(() => {
     let alive = true;
@@ -95,7 +107,7 @@ function useDeckManifest(workspaceId: string | null | undefined, path: string | 
     return () => {
       alive = false;
     };
-  }, [workspaceId, path, nonce]);
+  }, [workspaceId, path, nonce, externalRefresh]);
 
   return { ...state, reload };
 }
@@ -168,6 +180,8 @@ function ManifestPptxRenderer({ tab, manifest, onReverted }: { tab: WorkbenchTab
   const [selEl, setSelEl] = useState<string | null>(null);
   const [reverting, setReverting] = useState<string | null>(null);
   const [revertError, setRevertError] = useState<string | null>(null);
+  const [showIssues, setShowIssues] = useState(true);
+  const [inspectorTab, setInspectorTab] = useState<'issues' | 'element' | 'versions'>('issues');
   const addReference = useReferenceStore((s) => s.addReference);
   const reveal = useWorkbenchStore((s) => (s.reveal && s.reveal.tabId === tab.id ? s.reveal : null));
 
@@ -219,6 +233,25 @@ function ManifestPptxRenderer({ tab, manifest, onReverted }: { tab: WorkbenchTab
   const sh = preview?.height || 720;
   const selected = meta?.elements.find((e) => e.element_id === selEl) ?? null;
 
+  // issues for the active slide + a quick element->severity lookup for the overlay
+  const slideIdx = preview?.slide_index ?? activeIdx;
+  const slideIssues = useMemo(
+    () => (manifest.validation?.issues ?? []).filter((i) => i.slide_index === slideIdx),
+    [manifest.validation, slideIdx],
+  );
+  const issueSeverityByElement = useMemo(() => {
+    const map = new Map<string, 'error' | 'warning'>();
+    for (const i of slideIssues) {
+      const ids = [i.element_id, ...(i.element_ids ?? [])].filter(Boolean) as string[];
+      for (const id of ids) {
+        const prev = map.get(id);
+        if (i.severity === 'error' || prev !== 'error') map.set(id, i.severity === 'error' ? 'error' : 'warning');
+      }
+    }
+    return map;
+  }, [slideIssues]);
+  const elementById = (id: string | null | undefined) => meta?.elements.find((e) => e.element_id === id) ?? null;
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* validation header strip */}
@@ -230,6 +263,14 @@ function ManifestPptxRenderer({ tab, manifest, onReverted }: { tab: WorkbenchTab
         {visualFails > 0 && <span className="text-[#e3bd6a]" title="L2 视觉检查未通过项">· {visualFails} 视觉</span>}
         {!manifest.validation?.deliverable && <span className="text-[#e58c87]">· 不可交付</span>}
         <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={() => setShowIssues((v) => !v)}
+            title="在渲染图上标注问题元素"
+            className={cn('rounded-md border px-2 py-0.5 text-[11px] transition-colors',
+              showIssues ? 'border-[#c66a38]/60 bg-[#c66a38]/10 text-[#e8b08a]' : 'border-white/10 text-[#9a9590] hover:bg-white/[0.06]')}
+          >
+            问题{slideIssues.length > 0 ? ` ${slideIssues.length}` : ''}
+          </button>
           {/* version history / rollback */}
           {versions.length > 1 && (
             <div className="flex items-center gap-1" title="版本历史 / 回退">
@@ -319,6 +360,17 @@ function ManifestPptxRenderer({ tab, manifest, onReverted }: { tab: WorkbenchTab
                   style={{ left: `${(e.bbox[0] / sw) * 100}%`, top: `${(e.bbox[1] / sh) * 100}%`, width: `${(e.bbox[2] / sw) * 100}%`, height: `${(e.bbox[3] / sh) * 100}%` }}
                 />
               ))}
+              {/* issue overlay: outline elements that have validator issues */}
+              {mainPng && showIssues && (meta?.elements ?? [])
+                .filter((e) => issueSeverityByElement.has(e.element_id))
+                .map((e) => (
+                  <div
+                    key={`iss-${e.element_id}`}
+                    className={cn('pointer-events-none absolute rounded-[2px] border-2',
+                      issueSeverityByElement.get(e.element_id) === 'error' ? 'border-[#e0524d]' : 'border-[#d8a24a]')}
+                    style={{ left: `${(e.bbox[0] / sw) * 100}%`, top: `${(e.bbox[1] / sh) * 100}%`, width: `${(e.bbox[2] / sw) * 100}%`, height: `${(e.bbox[3] / sh) * 100}%` }}
+                  />
+                ))}
               {selected && (
                 <div className="pointer-events-none absolute left-2 top-2 max-w-[60%] truncate rounded bg-black/70 px-2 py-0.5 text-[10px] text-[#e8e6e3]">
                   选中：{selected.role || selected.type} · {selected.element_id}
@@ -347,6 +399,98 @@ function ManifestPptxRenderer({ tab, manifest, onReverted }: { tab: WorkbenchTab
             </div>
           )}
         </div>
+
+        {/* right inspector: issues / element metadata / version history */}
+        <div className="flex w-[232px] shrink-0 flex-col border-l border-white/[0.06] bg-[#0c0c0d]">
+          <div className="flex shrink-0 border-b border-white/[0.06] text-[11px]">
+            {([['issues', `问题 ${slideIssues.length}`], ['element', '元素'], ['versions', `版本 ${versions.length}`]] as const).map(([k, label]) => (
+              <button
+                key={k}
+                onClick={() => setInspectorTab(k)}
+                className={cn('flex-1 px-2 py-1.5 transition-colors', inspectorTab === k ? 'bg-[#16161a] text-[#e8e6e3]' : 'text-[#9a9590] hover:bg-white/[0.04]')}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto p-2 text-[11px]">
+            {inspectorTab === 'issues' && (
+              slideIssues.length === 0 ? (
+                <div className="px-1 py-2 text-[#7f7a74]">本页无问题 ✓</div>
+              ) : (
+                <div className="space-y-1.5">
+                  {slideIssues.map((iss) => {
+                    const el = elementById(iss.element_id);
+                    return (
+                      <div key={iss.id} className="rounded border border-white/[0.07] bg-[#141416] p-1.5">
+                        <div className="flex items-start gap-1.5">
+                          <span className={cn('mt-0.5 h-2 w-2 shrink-0 rounded-full', iss.severity === 'error' ? 'bg-[#e0524d]' : iss.severity === 'warning' ? 'bg-[#d8a24a]' : 'bg-[#6b8fb8]')} />
+                          <div className="min-w-0">
+                            <div className="font-medium text-[#d8d4ce]">{iss.type}{iss.auto_fixed ? ' · 已修复' : ''}</div>
+                            <div className="text-[#9a9590]">{iss.message}</div>
+                          </div>
+                        </div>
+                        <div className="mt-1 flex gap-1">
+                          {el && (
+                            <button onClick={() => { setMode('rendered'); setSelEl(el.element_id); }} className="rounded border border-white/10 px-1.5 py-0.5 text-[10px] text-[#c8c4be] hover:bg-white/[0.06]">定位</button>
+                          )}
+                          {!iss.auto_fixed && (
+                            <button
+                              onClick={() => { if (el) setSelEl(el.element_id); addReference(issueFixDraft(tab, slideIdx, iss, el)); }}
+                              className="rounded border border-[#c66a38]/40 bg-[#c66a38]/10 px-1.5 py-0.5 text-[10px] text-[#e8b08a] hover:bg-[#c66a38]/20"
+                            >
+                              让 Agent 修复
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )
+            )}
+            {inspectorTab === 'element' && (
+              selected ? (
+                <div className="space-y-1">
+                  <Meta k="id" v={selected.element_id} />
+                  <Meta k="role" v={selected.role} />
+                  <Meta k="type" v={selected.type} />
+                  <Meta k="bbox" v={selected.bbox.map((n) => Math.round(n)).join(', ')} />
+                  {selected.text && (
+                    <div>
+                      <div className="text-[#7f7a74]">text</div>
+                      <div className="max-h-40 overflow-y-auto rounded bg-[#141416] p-1 text-[#c8c4be]">{selected.text.slice(0, 400)}</div>
+                    </div>
+                  )}
+                  <button onClick={() => meta && addReference(metaElementDraft(tab, meta.slide_index, selected))} className="mt-1 flex items-center gap-1 rounded-md border border-white/10 px-2 py-0.5 text-[11px] text-[#e8e6e3] hover:bg-white/[0.08]">
+                    <Quote className="h-3 w-3" /> 引用本元素
+                  </button>
+                </div>
+              ) : (
+                <div className="px-1 py-2 text-[#7f7a74]">点击幻灯片中的元素查看详情</div>
+              )
+            )}
+            {inspectorTab === 'versions' && (
+              <div className="space-y-1">
+                {[...versions].reverse().map((v, i) => (
+                  <div key={v.version_id} className="rounded border border-white/[0.07] bg-[#141416] p-1.5">
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="font-medium text-[#d8d4ce]">{v.version_id} · {v.kind}</span>
+                      {i === 0 ? (
+                        <span className="text-[10px] text-[#7fd6a0]">当前</span>
+                      ) : (
+                        <button disabled={!!reverting} onClick={() => void handleRevert(v.version_id)} className="rounded border border-white/10 px-1.5 py-0.5 text-[10px] text-[#c8c4be] hover:bg-white/[0.06] disabled:opacity-40">
+                          {reverting === v.version_id ? '回退中…' : '回退'}
+                        </button>
+                      )}
+                    </div>
+                    {v.label && <div className="truncate text-[#9a9590]" title={v.label}>{v.label}</div>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       {selected && meta && (
@@ -356,6 +500,15 @@ function ManifestPptxRenderer({ tab, manifest, onReverted }: { tab: WorkbenchTab
           onClear={() => setSelEl(null)}
         />
       )}
+    </div>
+  );
+}
+
+function Meta({ k, v }: { k: string; v: string }) {
+  return (
+    <div className="flex gap-2">
+      <span className="w-10 shrink-0 text-[#7f7a74]">{k}</span>
+      <span className="min-w-0 break-all text-[#c8c4be]">{v}</span>
     </div>
   );
 }
