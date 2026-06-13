@@ -313,6 +313,8 @@ class ToolExecutor:
             "open_artifact": self._handle_open_artifact,
             "list_artifact_skills": self._handle_list_artifact_skills,
             "read_artifact_skill": self._handle_read_artifact_skill,
+            "generate_presentation": self._handle_generate_presentation,
+            "list_presentation_options": self._handle_list_presentation_options,
             "delete_file": self._handle_delete_file,
             "apply_patch": self._handle_apply_patch,
             "list_directory": self._handle_list_directory,
@@ -642,6 +644,101 @@ class ToolExecutor:
         from services.artifact_skill_service import available_artifact_skills
 
         return available_artifact_skills()
+
+    async def _handle_list_presentation_options(self, **_: Any) -> dict[str, Any]:
+        """List PPT engine themes + layouts for the agent to choose from."""
+        from ppt_engine.registry import get_layout_registry, get_theme_registry
+
+        return {
+            "success": True,
+            "themes": get_theme_registry().summaries(),
+            "layouts": get_layout_registry().summaries(),
+            "guidance": (
+                "Pick one theme_id for the whole deck and a layout per slide, then call "
+                "generate_presentation. Provide only content — the engine computes geometry, "
+                "colour, and font sizes, and validates/auto-repairs before delivery."
+            ),
+        }
+
+    async def _handle_generate_presentation(
+        self,
+        title: str = "",
+        theme_id: str = "tech-dark",
+        slides: list[dict[str, Any]] | None = None,
+        filename: str = "",
+        conversation_id: str = "",
+        workspace_id: str | None = None,
+        **_: Any,
+    ) -> dict[str, Any]:
+        """Run the PPT Artifact Engine and hand the deck to the Workbench."""
+        from ppt_engine.builder import build_deck_spec
+        from ppt_engine.engine import generate_deck
+
+        if not slides:
+            return {"success": False, "error": "slides is required (at least one slide)."}
+
+        ws = self._workspace_dir(conversation_id, workspace_id)
+        import re as _re
+
+        base = _re.sub(r"[^\w\-]+", "-", (filename or title or "deck").strip()).strip("-").lower() or "deck"
+        deck_id = f"{base[:40]}-{int(time.time())}"
+        try:
+            spec = build_deck_spec(title=title, theme_id=theme_id, slides=slides, deck_id=deck_id)
+            result = await asyncio.to_thread(generate_deck, spec, str(ws))
+        except Exception as exc:  # never crash the agent loop on a bad deck
+            logger.exception("generate_presentation failed")
+            return {"success": False, "error": f"Presentation generation failed: {exc}"}
+
+        v = result.validation
+        artifact = {
+            "id": result.artifact_id,
+            "title": result.title or title or "Presentation",
+            "path": result.pptx_path,
+            "workspaceId": workspace_id or conversation_id,
+            "mimeType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "kind": "presentation",
+            "deckId": result.deck_id,
+            "themeId": result.theme_id,
+            "slideCount": result.slide_count,
+            "previews": [p.model_dump() for p in result.previews],
+            "manifestPath": result.manifest_path,
+            "deckSpecPath": result.deck_spec_path,
+            "slideIrPath": result.slide_ir_path,
+            "validation": {
+                "grade": v.delivery_grade,
+                "deliverable": v.deliverable,
+                "errors": v.summary.error_count,
+                "warnings": v.summary.warning_count,
+                "autoFixed": v.summary.auto_fixed,
+                "repairRounds": v.repair_rounds,
+                "blocking": v.blocking_issue_types,
+            },
+        }
+        unresolved = [i.model_dump() for i in v.issues
+                      if i.severity.value == "error" and not i.auto_fixed]
+        return {
+            "success": True,
+            "open_artifact": True,
+            "artifact": artifact,
+            "validation_report": {
+                "grade": v.delivery_grade,
+                "deliverable": v.deliverable,
+                "summary": v.summary.model_dump(),
+                "blocking_issue_types": v.blocking_issue_types,
+                "unresolved_errors": unresolved[:20],
+            },
+            "previews": [p.model_dump() for p in result.previews],
+            "generation_log": result.generation_log,
+            "guidance": (
+                f"Deck delivered: {result.slide_count} slides, theme '{result.theme_id}', "
+                f"grade '{v.delivery_grade}' ({v.summary.error_count} errors, "
+                f"{v.summary.warning_count} warnings, {v.summary.auto_fixed} auto-fixed). "
+                + ("All blocking checks passed; the PPTX and per-page previews are in the Workbench."
+                   if v.deliverable else
+                   "NOT deliverable — blocking errors remain; tell the user which slides need rework "
+                   "and offer to regenerate. Do not present this as finished.")
+            ),
+        }
 
     async def _handle_read_artifact_skill(
         self,

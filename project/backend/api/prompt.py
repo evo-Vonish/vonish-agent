@@ -39,6 +39,8 @@ _tool_configs: dict[str, bool] = {
     # Artifact skills
     "list_artifact_skills": True,
     "read_artifact_skill": True,
+    "list_presentation_options": True,
+    "generate_presentation": True,
     # Human Interaction
     "set_todo_list": True,
     "expand_tool_result": True,

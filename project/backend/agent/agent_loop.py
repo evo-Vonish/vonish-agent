@@ -684,7 +684,6 @@ class AgentLoop:
                         )
                         if (
                             result.success
-                            and result.tool_name == "open_artifact"
                             and isinstance(result.result, dict)
                             and result.result.get("open_artifact")
                         ):

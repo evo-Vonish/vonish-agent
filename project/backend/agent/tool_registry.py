@@ -467,6 +467,107 @@ def register_default_tools() -> None:
         )
     )
 
+    # ── PPT Artifact Engine ──────────────────────────────────────────
+    registry.register(
+        ToolDefinition(
+            name="list_presentation_options",
+            description=(
+                "List the built-in presentation themes and layout recipes available to the "
+                "PPT Artifact Engine. Call this before generate_presentation to choose a theme "
+                "and pick a layout for each slide. Returns theme colour summaries and, for each "
+                "layout, its slots and which content fields it consumes."
+            ),
+            parameters={"type": "object", "properties": {}},
+            category="artifact",
+            requires_confirmation=False,
+        )
+    )
+
+    registry.register(
+        ToolDefinition(
+            name="generate_presentation",
+            description=(
+                "Generate a polished, native-editable .pptx through the VonishAgent PPT Artifact "
+                "Engine. You provide ONLY a theme, and for each slide a layout + content — never "
+                "pixel positions, colours, or font sizes (the engine owns geometry, the theme owns "
+                "colour/typography). The engine runs DeckDesignSpec -> SlideIR -> render -> validate "
+                "-> auto-repair -> PNG previews and returns the artifact, per-page previews, and a "
+                "validation report. ALWAYS use this instead of hand-writing python-pptx for slide "
+                "decks. Layouts: cover-center, toc-simple, chapter-break, three-cards, left-right, "
+                "timeline, process, architecture, data-chart, quote-center, code-block, summary-bullets."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "Deck title (used for the file name and cover fallback)."},
+                    "theme_id": {
+                        "type": "string",
+                        "enum": ["tech-dark", "academic-white", "business-bluegray", "vonish-agent", "vonish-ocr"],
+                        "description": "Design theme. tech-dark/vonish-agent = dark; academic-white/business-bluegray = light.",
+                    },
+                    "filename": {"type": "string", "description": "Optional output file name (without extension)."},
+                    "slides": {
+                        "type": "array",
+                        "description": "Ordered slides. Each picks a layout and supplies only the content that layout needs.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "layout": {
+                                    "type": "string",
+                                    "enum": ["cover-center", "toc-simple", "chapter-break", "three-cards",
+                                             "left-right", "timeline", "process", "architecture",
+                                             "data-chart", "quote-center", "code-block", "summary-bullets"],
+                                },
+                                "title": {"type": "string"},
+                                "subtitle": {"type": "string"},
+                                "meta": {"type": "string"},
+                                "chapter_number": {"type": "string"},
+                                "body": {"type": "string"},
+                                "footer": {"type": "string"},
+                                "bullets": {"type": "array", "items": {"type": "string"}},
+                                "cards": {
+                                    "type": "array",
+                                    "items": {"type": "object", "properties": {
+                                        "title": {"type": "string"}, "body": {"type": "string"}, "icon": {"type": "string"}}},
+                                },
+                                "items": {
+                                    "type": "array",
+                                    "description": "Steps/milestones/toc rows: {title, body, label}.",
+                                    "items": {"type": "object", "properties": {
+                                        "title": {"type": "string"}, "body": {"type": "string"}, "label": {"type": "string"}}},
+                                },
+                                "left": {"type": "object", "properties": {
+                                    "title": {"type": "string"}, "body": {"type": "string"},
+                                    "bullets": {"type": "array", "items": {"type": "string"}}}},
+                                "right": {"type": "object", "properties": {
+                                    "title": {"type": "string"}, "body": {"type": "string"},
+                                    "bullets": {"type": "array", "items": {"type": "string"}}}},
+                                "chart": {"type": "object", "properties": {
+                                    "type": {"type": "string", "enum": ["column", "bar", "line", "pie", "area"]},
+                                    "categories": {"type": "array", "items": {"type": "string"}},
+                                    "series": {"type": "array", "items": {"type": "object", "properties": {
+                                        "name": {"type": "string"}, "values": {"type": "array", "items": {"type": "number"}}}}},
+                                    "insight": {"type": "string"}}},
+                                "code": {"type": "object", "properties": {
+                                    "language": {"type": "string"}, "code": {"type": "string"}, "annotation": {"type": "string"}}},
+                                "quote": {"type": "object", "properties": {
+                                    "text": {"type": "string"}, "author": {"type": "string"}}},
+                                "diagram": {"type": "object", "properties": {
+                                    "nodes": {"type": "array", "items": {"type": "object", "properties": {
+                                        "id": {"type": "string"}, "label": {"type": "string"}, "group": {"type": "string"}}}},
+                                    "legend": {"type": "array", "items": {"type": "string"}}}},
+                            },
+                            "required": ["layout"],
+                        },
+                    },
+                },
+                "required": ["title", "theme_id", "slides"],
+            },
+            category="artifact",
+            requires_confirmation=False,
+        )
+    )
+
     # Web Search
     registry.register(
         ToolDefinition(

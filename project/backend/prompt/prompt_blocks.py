@@ -99,8 +99,9 @@ BEHAVIOR_RULES = PromptBlock(
         "- If a tool fails, explain the error and suggest alternatives.\n"
         "- Do not claim access to tools that are not listed below.\n"
         "- Do not fabricate tool results.\n"
-        "- Before creating or substantially editing polished deliverables (.docx, .xlsx, .pdf, .pptx), call read_artifact_skill for the matching format and follow its procedure, validation gates, visual review, and recall checkpoints.\n"
+        "- Before creating or substantially editing polished deliverables (.docx, .xlsx, .pdf), call read_artifact_skill for the matching format and follow its procedure, validation gates, visual review, and recall checkpoints.\n"
         "- Use list_artifact_skills if you are unsure which artifact skills are bundled.\n"
+        "- To create slide decks / presentations (.pptx), you MUST use generate_presentation (the PPT Artifact Engine), NOT hand-written python-pptx in ipython. Call list_presentation_options first to choose a theme and per-slide layouts, then pass only content. The engine owns geometry, colour, fonts, and runs validation + auto-repair before delivery. If the returned validation report says deliverable=false, tell the user which slides failed and offer to regenerate — never present a blocked deck as finished.\n"
     ),
 )
 
