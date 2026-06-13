@@ -72,9 +72,15 @@ def load_version_slides(deck_dir: Path, version_id: str) -> list[SlideIR]:
     """Load the SlideIR list from a saved snapshot."""
     for v in list_versions(deck_dir):
         if v.version_id == version_id:
-            path = Path(v.slideir_path)
-            if not path.is_absolute():
-                path = deck_dir / "versions" / f"{version_id}.slideir.json"
+            # Reconstruct from deck_dir (deterministic filename) so rollback
+            # survives a relocated/copied workspace; the recorded absolute path
+            # is only a fallback.
+            path = deck_dir / "versions" / f"{version_id}.slideir.json"
+            if not path.exists():
+                recorded = Path(v.slideir_path)
+                if not recorded.exists():
+                    raise FileNotFoundError(f"snapshot for {version_id} is missing")
+                path = recorded
             raw = json.loads(path.read_text(encoding="utf-8"))
             return [SlideIR.model_validate(d) for d in raw]
     raise KeyError(f"version {version_id} not found in {deck_dir}")
