@@ -20,7 +20,7 @@ from pptx import Presentation
 from ppt_engine.autorepair import repair_loop
 from ppt_engine.builder import build_deck_spec
 from ppt_engine.demo_decks import acceptance_deck
-from ppt_engine.engine import generate_deck
+from ppt_engine.engine import apply_deck_patch, generate_deck
 from ppt_engine.ir import build_deck_ir
 from ppt_engine.preview import render_previews
 from ppt_engine.registry import get_layout_registry, get_theme_registry
@@ -419,3 +419,46 @@ def test_engine_blocks_undeliverable_is_not_silent():
     clean_report = ValidationReport()
     assert clean_report.deliverable is True
     assert clean_report.blocking_issue_types == []
+
+
+# ---------------------------------------------------------------------------
+# Phase-2 element patch: round-trip through the persisted SlideIR
+# ---------------------------------------------------------------------------
+def test_apply_deck_patch(tmp_path):
+    result = generate_deck(acceptance_deck("tech-dark"), tmp_path)
+    assert result.validation.deliverable is True
+
+    # locate the cover title element id from the persisted slide meta
+    title_box = next(e for e in result.slides_meta[0].elements if e.role == "title")
+    assert title_box.text  # has original text
+
+    patched = apply_deck_patch(
+        tmp_path, result.pptx_path, slide_index=0,
+        operations=[
+            {"op": "replace_text", "target": title_box.element_id, "value": "PATCHED 标题"},
+            {"op": "update_style", "target": title_box.element_id,
+             "changes": {"color": "#22D3EE", "bold": True}},
+        ],
+        reasoning="unit test patch")
+
+    assert patched.validation.deliverable is True
+    assert patched.slide_count == result.slide_count
+
+    # the persisted SlideIR reflects the edit
+    ir_data = json.loads((tmp_path / patched.slide_ir_path).read_text(encoding="utf-8"))
+    title_el = next(e for e in ir_data[0]["elements"] if e["element_id"] == title_box.element_id)
+    assert title_el["text"] == "PATCHED 标题"
+    assert title_el["text_style"]["color"] == "#22D3EE"
+
+    # the manifest's slide meta also reflects it, and the pptx/preview exist
+    patched_box = next(e for e in patched.slides_meta[0].elements if e.element_id == title_box.element_id)
+    assert patched_box.text == "PATCHED 标题"
+    assert (tmp_path / patched.pptx_path).exists()
+    assert all((tmp_path / p.path).exists() for p in patched.previews)
+
+
+def test_apply_deck_patch_missing_deck(tmp_path):
+    import pytest as _pytest
+    with _pytest.raises(FileNotFoundError):
+        apply_deck_patch(tmp_path, "outputs/ppt/nope/deck.pptx", 0,
+                         [{"op": "replace_text", "target": "x", "value": "y"}])

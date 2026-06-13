@@ -257,6 +257,26 @@ function ManifestPptxRenderer({ tab, manifest }: { tab: WorkbenchTab; manifest: 
               ) : (
                 <div className="flex h-full items-center justify-center text-[12px] text-[#9a9590]">加载渲染图…</div>
               )}
+              {/* clickable element hit-targets over the rendered PNG (for element-level patch) */}
+              {mainPng && (meta?.elements ?? []).map((e) => (
+                <button
+                  key={e.element_id}
+                  title={`${e.role} · ${e.element_id}`}
+                  onClick={() => setSelEl((cur) => (cur === e.element_id ? null : e.element_id))}
+                  className={cn(
+                    'absolute rounded-[2px] transition-colors',
+                    selEl === e.element_id
+                      ? 'border-2 border-[#c66a38] bg-[#c66a38]/10'
+                      : 'border border-transparent hover:border-[#c66a38]/50 hover:bg-[#c66a38]/[0.06]',
+                  )}
+                  style={{ left: `${(e.bbox[0] / sw) * 100}%`, top: `${(e.bbox[1] / sh) * 100}%`, width: `${(e.bbox[2] / sw) * 100}%`, height: `${(e.bbox[3] / sh) * 100}%` }}
+                />
+              ))}
+              {selected && (
+                <div className="pointer-events-none absolute left-2 top-2 max-w-[60%] truncate rounded bg-black/70 px-2 py-0.5 text-[10px] text-[#e8e6e3]">
+                  选中：{selected.role || selected.type} · {selected.element_id}
+                </div>
+              )}
             </div>
           ) : (
             <div className="relative mx-auto bg-white" style={{ width: '100%', maxWidth: 960, aspectRatio: `${sw} / ${sh}` }}>
@@ -282,7 +302,7 @@ function ManifestPptxRenderer({ tab, manifest }: { tab: WorkbenchTab; manifest: 
         </div>
       </div>
 
-      {mode === 'structure' && selected && meta && (
+      {selected && meta && (
         <SelectionActionBar
           label={`Slide ${activeIdx + 1} · ${selected.role || selected.type}`}
           draft={metaElementDraft(tab, meta.slide_index, selected)}

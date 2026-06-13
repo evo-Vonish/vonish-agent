@@ -568,6 +568,59 @@ def register_default_tools() -> None:
         )
     )
 
+    registry.register(
+        ToolDefinition(
+            name="patch_presentation",
+            description=(
+                "Apply a targeted, element-level edit to a deck previously created with "
+                "generate_presentation — WITHOUT regenerating the whole deck. Use this when the "
+                "user selects/references a slide element in the Workbench and asks to change it "
+                "(reword a title, recolour a shape, move/resize a box, delete a decoration). "
+                "Identify the element by its element_id (shown on the referenced element / in the "
+                "slide's element metadata). The engine re-renders only what changed, re-validates, "
+                "and auto-repairs before returning the updated artifact + previews."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "deck_path": {
+                        "type": "string",
+                        "description": "Workspace-relative path to the deck's deck.pptx (as returned by generate_presentation / shown in the Workbench).",
+                    },
+                    "slide_index": {"type": "integer", "description": "0-based index of the slide to edit."},
+                    "operations": {
+                        "type": "array",
+                        "description": "Element operations to apply to that slide.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "op": {
+                                    "type": "string",
+                                    "enum": ["replace_text", "update_style", "update_shape_style",
+                                             "move", "resize", "add_decoration", "delete"],
+                                },
+                                "target": {"type": "string", "description": "element_id to edit."},
+                                "value": {"type": "string", "description": "New text for replace_text."},
+                                "changes": {
+                                    "type": "object",
+                                    "description": (
+                                        "For update_style: fontSize/color/bold/italic/align/valign/fontFamily. "
+                                        "For update_shape_style: fill/stroke/strokeWidth/radius. "
+                                        "For move: x/y. For resize: width/height. Coordinates are canvas px."),
+                                },
+                            },
+                            "required": ["op", "target"],
+                        },
+                    },
+                    "reasoning": {"type": "string", "description": "Short why-note for the edit."},
+                },
+                "required": ["deck_path", "slide_index", "operations"],
+            },
+            category="artifact",
+            requires_confirmation=False,
+        )
+    )
+
     # Web Search
     registry.register(
         ToolDefinition(

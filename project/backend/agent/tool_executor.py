@@ -314,6 +314,7 @@ class ToolExecutor:
             "list_artifact_skills": self._handle_list_artifact_skills,
             "read_artifact_skill": self._handle_read_artifact_skill,
             "generate_presentation": self._handle_generate_presentation,
+            "patch_presentation": self._handle_patch_presentation,
             "list_presentation_options": self._handle_list_presentation_options,
             "delete_file": self._handle_delete_file,
             "apply_patch": self._handle_apply_patch,
@@ -689,6 +690,13 @@ class ToolExecutor:
             logger.exception("generate_presentation failed")
             return {"success": False, "error": f"Presentation generation failed: {exc}"}
 
+        return self._presentation_payload(result, title, workspace_id, conversation_id, verb="generate")
+
+    @staticmethod
+    def _presentation_payload(
+        result: Any, title: str, workspace_id: str | None, conversation_id: str, *, verb: str
+    ) -> dict[str, Any]:
+        """Shared tool result for generate_presentation / patch_presentation."""
         v = result.validation
         artifact = {
             "id": result.artifact_id,
@@ -716,6 +724,7 @@ class ToolExecutor:
         }
         unresolved = [i.model_dump() for i in v.issues
                       if i.severity.value == "error" and not i.auto_fixed]
+        action = "delivered" if verb == "generate" else "patched"
         return {
             "success": True,
             "open_artifact": True,
@@ -730,15 +739,48 @@ class ToolExecutor:
             "previews": [p.model_dump() for p in result.previews],
             "generation_log": result.generation_log,
             "guidance": (
-                f"Deck delivered: {result.slide_count} slides, theme '{result.theme_id}', "
+                f"Deck {action}: {result.slide_count} slides, theme '{result.theme_id}', "
                 f"grade '{v.delivery_grade}' ({v.summary.error_count} errors, "
                 f"{v.summary.warning_count} warnings, {v.summary.auto_fixed} auto-fixed). "
-                + ("All blocking checks passed; the PPTX and per-page previews are in the Workbench."
+                + ("All blocking checks passed; the updated PPTX and per-page previews are in the Workbench."
                    if v.deliverable else
-                   "NOT deliverable — blocking errors remain; tell the user which slides need rework "
-                   "and offer to regenerate. Do not present this as finished.")
+                   "NOT deliverable — blocking errors remain; tell the user which slides need rework. "
+                   "Do not present this as finished.")
             ),
         }
+
+    async def _handle_patch_presentation(
+        self,
+        deck_path: str = "",
+        slide_index: int = 0,
+        operations: list[dict[str, Any]] | None = None,
+        reasoning: str = "",
+        conversation_id: str = "",
+        workspace_id: str | None = None,
+        **_: Any,
+    ) -> dict[str, Any]:
+        """Apply an element-level patch to an existing deck and re-render it."""
+        from ppt_engine.engine import apply_deck_patch
+
+        if not deck_path:
+            return {"success": False, "error": "deck_path is required"}
+        if not operations:
+            return {"success": False, "error": "operations is required (at least one)"}
+
+        ws = self._workspace_dir(conversation_id, workspace_id)
+        try:
+            result = await asyncio.to_thread(
+                apply_deck_patch, str(ws), deck_path, int(slide_index),
+                operations, reasoning=reasoning)
+        except FileNotFoundError:
+            return {"success": False, "error": (
+                "Could not find this deck's SlideIR sidecar. patch_presentation only "
+                "works on decks created by generate_presentation in this workspace.")}
+        except Exception as exc:
+            logger.exception("patch_presentation failed")
+            return {"success": False, "error": f"Patch failed: {exc}"}
+
+        return self._presentation_payload(result, result.title, workspace_id, conversation_id, verb="patch")
 
     async def _handle_read_artifact_skill(
         self,
